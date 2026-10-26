@@ -54,6 +54,9 @@ class Jit {
   public static var autoSweepEvery:Int = 0;
   static var sinceSweep:Int = 0;
   static var frame:Int = 0;
+  static var watched:Array<{path:String, name:String, sig:String, cb:Null<JitModule->Void>}> = [];
+  public static var watchEvery:Int = 30;
+  static var watchTick:Int = 0;
   static var inited:Bool = false;
   static var hooked:Bool = false;
 
@@ -273,8 +276,63 @@ class Jit {
     if (h != 0 || image != null) retired.push({h: h, t: frame, image: image});
   }
 
+  public static function watch(path:String, ?name:String, ?onReload:JitModule->Void):Bool {
+    if (!FileSystem.exists(path)) return false;
+    var n = name == null ? haxe.io.Path.withoutExtension(haxe.io.Path.withoutDirectory(path)) : name;
+    var cur = "";
+    try cur = File.getContent(path) catch (e:Dynamic) return false;
+    for (w in watched) {
+      if (w.path == path) {
+        w.name = n;
+        w.sig = cur;
+        w.cb = onReload;
+        return true;
+      }
+    }
+    watched.push({path: path, name: n, sig: cur, cb: onReload});
+    if (mods.get(n) == null) compile(n, cur);
+    return true;
+  }
+
+  public static function unwatch(path:String):Bool {
+    var keep = [];
+    var found = false;
+    for (w in watched) {
+      if (w.path == path) found = true else keep.push(w);
+    }
+    watched = keep;
+    return found;
+  }
+
+  public static function watchedFiles():Array<String> {
+    return [for (w in watched) w.path];
+  }
+
+  static function pollWatch():Void {
+    for (w in watched) {
+      var src = "";
+      try src = File.getContent(w.path) catch (e:Dynamic) continue;
+      if (src == w.sig) continue;
+      w.sig = src;
+      var m = compile(w.name, src, {force: true});
+      if (m.ok) {
+        if (verbose) log("[jit] reloaded " + w.name);
+        if (w.cb != null) w.cb(m);
+      } else if (verbose) {
+        log("[jit] reload failed for " + w.name);
+      }
+    }
+  }
+
   public static function tick():Void {
     frame++;
+    if (watched.length > 0) {
+      watchTick++;
+      if (watchTick >= watchEvery) {
+        watchTick = 0;
+        pollWatch();
+      }
+    }
     if (retired.length > 0) {
       var keep = [];
       for (r in retired) {
@@ -572,8 +630,10 @@ class Jit {
   }
 
   public static function f3(v:Float):String {
-    var n = Math.round(v * 1000.0);
-    return Std.string(Std.int(n / 1000)) + "." + StringTools.lpad(Std.string(n % 1000), "0", 3);
+    var neg = v < 0;
+    var n = Math.round(Math.abs(v) * 1000.0);
+    var s = Std.string(Std.int(n / 1000)) + "." + StringTools.lpad(Std.string(n % 1000), "0", 3);
+    return neg ? "-" + s : s;
   }
 
   public static function selfTest():String {

@@ -5,7 +5,7 @@ import hxcpp_jit_r.JitScan.JitVarInfo;
 import hxcpp_jit_r.JitScan.JitStructInfo;
 
 class JitCodegen {
-  public static inline var BUILD:Int = 6;
+  public static inline var BUILD:Int = 7;
 
   public static function emit(fns:Array<JitFnInfo>, vars:Array<JitVarInfo>, extra:Array<String> = null, structs:Array<JitStructInfo> = null):String {
     var b = new StringBuf();
@@ -46,6 +46,7 @@ class JitCodegen {
     for (v in vars) {
       used = true;
       if (v.kind == "array") {
+        b.add('extern "C" RJIT_API double rjit_addra_' + v.name + '(RJitCtx* ctx, RJitArgs* args) { return (double)(size_t)(void*)&' + v.name + '[0]; }\n');
         b.add('extern "C" RJIT_API double rjit_geta_' + v.name + '(RJitCtx* ctx, RJitArgs* args) {\n'
           + '  int i = (int)args->a[0];\n'
           + '  if (i < 0 || i >= ' + v.size + ') return 0.0;\n'

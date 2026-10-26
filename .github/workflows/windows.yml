@@ -20,12 +20,35 @@ jobs:
         with:
           arch: x64
 
-      - name: Install Haxe
-        run: choco install haxe -y --no-progress
+      - name: Install Haxe and Neko
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $haxeVer = "4.3.4"
+          $nekoVer = "2.3.0"
+
+          Invoke-WebRequest "https://github.com/HaxeFoundation/haxe/releases/download/$haxeVer/haxe-$haxeVer-win64.zip" -OutFile haxe.zip
+          Invoke-WebRequest "https://github.com/HaxeFoundation/neko/releases/download/v2-3-0/neko-$nekoVer-win64.zip" -OutFile neko.zip
+
+          foreach ($pair in @(@("haxe.zip", "C:\haxe"), @("neko.zip", "C:\neko"))) {
+            $zip = $pair[0]; $dest = $pair[1]
+            $tmp = "$dest-tmp"
+            Expand-Archive $zip -DestinationPath $tmp -Force
+            $inner = Get-ChildItem $tmp -Directory | Select-Object -First 1
+            if ($inner) { Move-Item $inner.FullName $dest -Force } else { Move-Item $tmp $dest -Force }
+          }
+
+          Copy-Item "C:\neko\*" "C:\haxe\" -Recurse -Force
+
+          "C:\haxe" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          "NEKOPATH=C:\haxe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Setup haxelib
         shell: pwsh
+        env:
+          NEKOPATH: C:\haxe
         run: |
+          $ErrorActionPreference = "Stop"
           haxe --version
           haxelib setup C:\haxelib
           haxelib install hxcpp --quiet
@@ -35,6 +58,8 @@ jobs:
       - name: Build tests
         shell: pwsh
         working-directory: test
+        env:
+          NEKOPATH: C:\haxe
         run: haxe build.hxml
 
       - name: Run tests

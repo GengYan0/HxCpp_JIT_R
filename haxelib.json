@@ -4,9 +4,9 @@
   "license": "MIT",
   "tags": ["cpp", "jit", "native", "windows", "msvc", "runtime", "hot-reload"],
   "description": "Compile and execute native C++ at runtime inside hxcpp applications, with automatic signatures, string arguments, struct and array access, hot reload, crash isolation and manual PE loading.",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "classPath": "src",
-  "releasenote": "beta: runtime C++ compilation, automatic signatures, string arguments, struct and array access, manual loader",
+  "releasenote": "beta: bulk array transfer, file watch, callFast, manual loader, string arguments, struct and array access",
   "contributors": ["GengYan0"],
   "dependencies": {}
 }

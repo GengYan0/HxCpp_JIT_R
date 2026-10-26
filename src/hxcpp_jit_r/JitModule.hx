@@ -173,6 +173,106 @@ class JitModule {
     return true;
   }
 
+  public function arrayAddress(n:String):Float {
+    var v = vars.get(n);
+    if (v == null || v.kind != "array" || handle == 0) return 0;
+    var p = resolve("rjit_addra_" + n);
+    if (p == 0) return 0;
+    return JitNative.invoke(p, ctx, 0, 0, 0, 0, 0, 0, 0);
+  }
+
+  public function elemSize(n:String):Int {
+    var v = vars.get(n);
+    if (v == null) return 0;
+    return switch (v.elem) {
+      case "c": 1;
+      case "h": 2;
+      case "l": 8;
+      case "f": 4;
+      case "d": 8;
+      default: 4;
+    }
+  }
+
+  public function readRaw(n:String, ?count:Int):haxe.io.Bytes {
+    var v = vars.get(n);
+    if (v == null || v.kind != "array") return null;
+    var es = elemSize(n);
+    if (es <= 0) return null;
+    var cnt = count == null ? v.size : count;
+    if (cnt > v.size) cnt = v.size;
+    if (cnt < 0) cnt = 0;
+    var a = arrayAddress(n);
+    if (a == 0) return null;
+    var bytes = haxe.io.Bytes.alloc(cnt * es);
+    JitNative.copyOut(JitNative.toSizeT(a), bytes, cnt * es);
+    return bytes;
+  }
+
+  public function writeRaw(n:String, bytes:haxe.io.Bytes):Bool {
+    var v = vars.get(n);
+    if (v == null || v.kind != "array" || v.isConst || bytes == null) return false;
+    var a = arrayAddress(n);
+    if (a == 0) return false;
+    var cap = v.size * elemSize(n);
+    var len = bytes.length > cap ? cap : bytes.length;
+    JitNative.copyIn(JitNative.toSizeT(a), bytes, len);
+    return true;
+  }
+
+  public function readDoubles(n:String, ?count:Int):Array<Float> {
+    var v = vars.get(n);
+    if (v == null || v.elem != "d") return [];
+    var b = readRaw(n, count);
+    if (b == null) return [];
+    var out:Array<Float> = [];
+    var i = 0;
+    while (i + 8 <= b.length) {
+      out.push(b.getDouble(i));
+      i += 8;
+    }
+    return out;
+  }
+
+  public function writeDoubles(n:String, vals:Array<Float>):Bool {
+    var v = vars.get(n);
+    if (v == null || v.elem != "d" || vals == null) return false;
+    var cnt = vals.length > v.size ? v.size : vals.length;
+    var b = haxe.io.Bytes.alloc(cnt * 8);
+    for (i in 0...cnt) b.setDouble(i * 8, vals[i]);
+    return writeRaw(n, b);
+  }
+
+  public function readInts(n:String, ?count:Int):Array<Int> {
+    var v = vars.get(n);
+    if (v == null || (v.elem != "i" && v.elem != "u")) return [];
+    var b = readRaw(n, count);
+    if (b == null) return [];
+    var out:Array<Int> = [];
+    var i = 0;
+    while (i + 4 <= b.length) {
+      out.push(b.getInt32(i));
+      i += 4;
+    }
+    return out;
+  }
+
+  public function writeInts(n:String, vals:Array<Int>):Bool {
+    var v = vars.get(n);
+    if (v == null || (v.elem != "i" && v.elem != "u") || vals == null) return false;
+    var cnt = vals.length > v.size ? v.size : vals.length;
+    var b = haxe.io.Bytes.alloc(cnt * 4);
+    for (i in 0...cnt) b.setInt32(i * 4, vals[i]);
+    return writeRaw(n, b);
+  }
+
+  public function callFast(n:String, a0:Float = 0.0, a1:Float = 0.0, a2:Float = 0.0, a3:Float = 0.0, a4:Float = 0.0, a5:Float = 0.0):Float {
+    var f = fn(n);
+    if (f == 0) return 0.0;
+    calls++;
+    return JitNative.invokeFast(f, ctx, 6, a0, a1, a2, a3, a4, a5);
+  }
+
   public function get(path:String):Float {
     var v = path;
     var dot = path.indexOf(".");

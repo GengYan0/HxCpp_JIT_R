@@ -261,7 +261,7 @@ int first(std::string s) { return s.empty() ? -1 : (int)s[0]; }
     eq("sig lens", sm.signature("lens"), "i(s)");
     eq("sig adds", sm.signature("adds"), "i(SS)");
     eq("lens hello", Std.string(sm.callAuto("lens", [], ["hello"])), "5");
-    eq("lens cn utf8", Std.string(sm.callAuto("lens", [], ["\u4e2d\u6587"])), "6");
+    eq("lens utf8", Std.string(sm.callAuto("lens", [], ["caf\u00e9"])), "5");
     eq("mixs int+str", Std.string(sm.callAuto("mixs", [10], ["abcd"])), "14");
     eq("adds two strings", Std.string(sm.callAuto("adds", [], ["abc", "de"])), "5");
     eq("first char", Std.string(sm.callAuto("first", [], ["A"])), "65");
@@ -405,6 +405,68 @@ int ids[3];
     Jit.maxParallel = 2;
     Jit.setup({cache: oldCache});
     ok("cache restored", Jit.cache.root.indexOf("jitcache") >= 0, Jit.cache.root);
+
+    head("bulk array io");
+    var bk = Jit.compile("bulk", 'double samples[16];
+int ids[8];
+double sum_all() { double s = 0; for (int i = 0; i < 16; i++) s += samples[i]; return s; }
+');
+    ok("bulk compile", bk.ok, bk.diag.length > 0 ? JitCompiler.describe(bk.diag[0]) : "");
+    ok("write doubles", bk.writeDoubles("samples", [for (i in 1...17) i * 1.0]), "");
+    var rd = bk.readDoubles("samples");
+    eq("read doubles count", Std.string(rd.length), "16");
+    eq("read doubles edges", Std.string(rd[0] + rd[15]), "17");
+    eq("native sees bulk data", Std.string(bk.callAuto("sum_all", [])), "136");
+    ok("write ints", bk.writeInts("ids", [1, 2, 3, 4]), "");
+    eq("read ints full", bk.readInts("ids").join(","), "1,2,3,4,0,0,0,0");
+    eq("read ints partial", bk.readInts("ids", 4).join(","), "1,2,3,4");
+    ok("array address", bk.arrayAddress("samples") != 0, "");
+    ok("write doubles clamps", bk.writeDoubles("samples", [for (i in 0...100) i * 1.0]), "");
+    eq("clamped count", Std.string(bk.readDoubles("samples").length), "16");
+    eq("clamped last", Std.string(bk.readDoubles("samples")[15]), "15");
+    ok("raw roundtrip", bk.readRaw("samples") != null && bk.readRaw("samples").length == 128, "");
+    ok("bulk rejects non array", bk.readDoubles("nope").length == 0 && !bk.writeDoubles("nope", [1]), "");
+
+    head("fast call");
+    var fcm = Jit.compile("fastc", "RJIT(sq) { return RJIT_A0 * RJIT_A0; }\n");
+    ok("fast compile", fcm.ok, "");
+    var reps2 = 2000000;
+    var tSlow = Sys.time();
+    var accSlow:Float = 0;
+    for (i in 0...reps2) accSlow += fcm.call("sq", i * 0.0001);
+    var slowUs = (Sys.time() - tSlow) * 1000000.0 / reps2;
+    var tFast = Sys.time();
+    var accFast:Float = 0;
+    for (i in 0...reps2) accFast += fcm.callFast("sq", i * 0.0001);
+    var fastUs = (Sys.time() - tFast) * 1000000.0 / reps2;
+    ok("fast matches call", Math.abs(accSlow - accFast) < 1.0, Jit.f3(accSlow) + " vs " + Jit.f3(accFast));
+    ok("both paths measurably fast", fastUs > 0 && slowUs > 0 && slowUs < 1.0, "call=" + Jit.f3(slowUs) + "us  fast=" + Jit.f3(fastUs) + "us");
+
+    head("file watch");
+    var wpath = "watchme.cpp";
+    sys.io.File.saveContent(wpath, "double wv() { return 1; }\n");
+    ok("watch registered", Jit.watch(wpath, "watched"), "");
+    ok("watched listed", Jit.watchedFiles().indexOf(wpath) >= 0, Jit.watchedFiles().join(","));
+    var wm = Jit.get("watched");
+    eq("watched initial", Std.string(wm == null ? -1 : wm.callAuto("wv", [])), "1");
+    sys.io.File.saveContent(wpath, "double wv() { return 2; }\n");
+    Jit.watchEvery = 1;
+    for (i in 0...8) {
+      Jit.tick();
+      Sys.sleep(0.02);
+    }
+    wm = Jit.get("watched");
+    eq("watched reloaded", Std.string(wm == null ? -1 : wm.callAuto("wv", [])), "2");
+    ok("unwatch", Jit.unwatch(wpath), "");
+    sys.io.File.saveContent(wpath, "double wv() { return 3; }\n");
+    for (i in 0...8) {
+      Jit.tick();
+      Sys.sleep(0.02);
+    }
+    wm = Jit.get("watched");
+    eq("stops after unwatch", Std.string(wm == null ? -1 : wm.callAuto("wv", [])), "2");
+    Jit.watchEvery = 30;
+    try sys.FileSystem.deleteFile(wpath) catch (e:Dynamic) {};
 
     head("throughput");
     var pm = Jit.compile("perf", "RJIT(mix) { double s = 0; for (int i = 0; i < 8; i++) s += (double)i * RJIT_A0; return s; }\n");

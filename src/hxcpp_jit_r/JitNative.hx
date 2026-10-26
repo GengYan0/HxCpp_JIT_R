@@ -329,6 +329,36 @@ class JitNative {
   ')
   public static function getACP():Int return 936;
 
+  @:functionCode('
+    if (len <= 0 || src == 0) return;
+    int cap = bytes->length;
+    int n = len > cap ? cap : len;
+    memcpy(bytes->b->Pointer(), (const void*)(size_t)src, (size_t)n);
+  ')
+  public static function copyOut(src:cpp.SizeT, bytes:haxe.io.Bytes, len:Int):Void {}
+
+  @:functionCode('
+    if (len <= 0 || dst == 0) return;
+    int cap = bytes->length;
+    int n = len > cap ? cap : len;
+    memcpy((void*)(size_t)dst, bytes->b->Pointer(), (size_t)n);
+  ')
+  public static function copyIn(dst:cpp.SizeT, bytes:haxe.io.Bytes, len:Int):Void {}
+
+  @:functionCode('
+    RJitArgs a;
+    memset(&a, 0, sizeof(a));
+    a.n = n;
+    a.a[0] = a0;
+    a.a[1] = a1;
+    a.a[2] = a2;
+    a.a[3] = a3;
+    a.a[4] = a4;
+    a.a[5] = a5;
+    return reinterpret_cast<RJitFn>(fn)(reinterpret_cast<RJitCtx*>(ctx), &a);
+  ')
+  public static function invokeFast(fn:cpp.SizeT, ctx:cpp.SizeT, n:Int, a0:Float, a1:Float, a2:Float, a3:Float, a4:Float, a5:Float):Float return 0;
+
   @:functionCode('return (double)(size_t)v;')
   public static function toFloat(v:cpp.SizeT):Float return 0;
 
