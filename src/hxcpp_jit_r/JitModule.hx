@@ -123,7 +123,7 @@ class JitModule {
 
   public function getVar(n:String):Float {
     var v = vars.get(n);
-    if (v == null || handle == 0 || v.kind != "num") return 0.0;
+    if (v == null || handle == 0 || (v.kind != "num" && v.kind != "ptr")) return 0.0;
     var p = resolve("rjit_getv_" + n);
     if (p == 0) return 0.0;
     return JitNative.invoke(p, ctx, 0, 0, 0, 0, 0, 0, 0);
@@ -131,7 +131,7 @@ class JitModule {
 
   public function setVar(n:String, v:Float):Bool {
     var info = vars.get(n);
-    if (info == null || info.isConst || handle == 0 || info.kind != "num") return false;
+    if (info == null || info.isConst || handle == 0 || (info.kind != "num" && info.kind != "ptr")) return false;
     var p = resolve("rjit_setv_" + n);
     if (p == 0) return false;
     JitNative.invoke(p, ctx, 1, v, 0, 0, 0, 0, 0);
@@ -274,6 +274,7 @@ class JitModule {
   }
 
   public function get(path:String):Float {
+    if (path.charAt(0) == "&") return addrOf(StringTools.trim(path.substr(1)));
     var v = path;
     var dot = path.indexOf(".");
     var lb = path.indexOf("[");
@@ -291,8 +292,15 @@ class JitModule {
     }
     var info = vars.get(v);
     if (info == null) return Math.NaN;
-    if (info.kind != "num") return Math.NaN;
+    if (info.kind != "num" && info.kind != "ptr") return Math.NaN;
     return getVar(v);
+  }
+
+  public function addrOf(n:String):Float {
+    if (handle == 0) return 0.0;
+    var p = resolve("rjit_addrv_" + n);
+    if (p == 0) return 0.0;
+    return JitNative.invoke(p, ctx, 0, 0, 0, 0, 0, 0, 0);
   }
 
   public function set(path:String, val:Float):Bool {
@@ -420,8 +428,19 @@ class JitModule {
     return handle != 0 && resolve(JitCodegen.dispName(sig)) != 0;
   }
 
-  public function callStr(n:String, args:Array<Float> = null):String {
+  public function callStr(n:String, args:Array<Float> = null, ?strs:Array<String>):String {
     JitHost.clearRet(id);
+    var f = fns.get(n);
+    if (f != null && f.ret == "S" && handle != 0) {
+      var p = resolve("rjit_str_" + JitCodegen.ptrName(n, f.sig));
+      if (p != 0) {
+        var ar = args == null ? [] : args;
+        var r = JitNative.invokeB(p, ctx, ar.length, a(ar, 0), a(ar, 1), a(ar, 2), a(ar, 3), a(ar, 4), a(ar, 5),
+          bytesOf(strs, 0), bytesOf(strs, 1), bytesOf(strs, 2), bytesOf(strs, 3));
+        guard(r, "callStr", n);
+        return JitHost.takeRet(id);
+      }
+    }
     callA(n, args == null ? [] : args);
     return JitHost.takeRet(id);
   }

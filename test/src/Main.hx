@@ -278,6 +278,40 @@ int sn(std::string a, int m, std::string b, int n) { return (int)a.size() * 1000
     eq("six numeric args", Std.string(sm2.callAuto("six", [1, 2, 3, 4, 5, 6])), "91");
     eq("string int interleave", Std.string(sm2.callAuto("sn", [2, 3], ["abcd", "xy"])), "4223");
 
+    head("string return");
+    var sr = Jit.compile("strret", 'std::string greet(std::string name) { return "Hello, " + name; }
+std::string tag(int n) { return n > 0 ? std::string("pos") : std::string("neg"); }
+std::string empty_one() { return std::string(); }
+');
+    ok("string return compile", sr.ok, sr.diag.length > 0 ? JitCompiler.describe(sr.diag[0]) : "");
+    eq("greet Haxe", sr.callStr("greet", [], ["Haxe"]), "Hello, Haxe");
+    eq("greet utf8", sr.callStr("greet", [], ["caf\u00e9"]), "Hello, caf\u00e9");
+    eq("tag pos", sr.callStr("tag", [1]), "pos");
+    eq("tag neg", sr.callStr("tag", [0]), "neg");
+    eq("empty string return", sr.callStr("empty_one", []), "");
+    eq("numeric call on string fn", Std.string(sr.callAuto("greet", [], ["x"])), "0");
+
+    head("pointer variables");
+    var pm = Jit.compile("ptrs", 'int value = 5;
+int other = 9;
+int* ptr = &value;
+int read(int* p) { return *p; }
+int write(int* p, int v) { *p = v; return *p; }
+');
+    ok("pointer compile", pm.ok, pm.diag.length > 0 ? JitCompiler.describe(pm.diag[0]) : "");
+    eq("kind ptr", pm.kindOf("ptr"), "ptr");
+    var pv = pm.get("ptr");
+    ok("ptr reads as address", pv > 0, Std.string(pv));
+    eq("addrOf value equals ptr", Std.string(pm.get("&value")), Std.string(pv));
+    ok("addrOf differs", pm.get("&other") != pm.get("&value"));
+    eq("read through ptr", Std.string(pm.callAuto("read", [pv])), "5");
+    eq("write through ptr", Std.string(pm.callAuto("write", [pv, 42])), "42");
+    eq("value changed", Std.string(pm.get("value")), "42");
+    ok("repoint ptr", pm.set("ptr", pm.get("&other")));
+    eq("read repointed", Std.string(pm.callAuto("read", [pm.get("ptr")])), "9");
+    ok("null ptr set", pm.set("ptr", 0));
+    eq("ptr null", Std.string(pm.get("ptr")), "0");
+
     head("struct and array access");
     var stc = Jit.compile("agg", 'struct Vec2 { double x; double y; };
 struct Stat { int hp; int mp; double spd; };

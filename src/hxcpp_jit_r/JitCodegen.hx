@@ -5,7 +5,7 @@ import hxcpp_jit_r.JitScan.JitVarInfo;
 import hxcpp_jit_r.JitScan.JitStructInfo;
 
 class JitCodegen {
-  public static inline var BUILD:Int = 8;
+  public static inline var BUILD:Int = 9;
 
   public static function emit(fns:Array<JitFnInfo>, vars:Array<JitVarInfo>, extra:Array<String> = null, structs:Array<JitStructInfo> = null):String {
     var b = new StringBuf();
@@ -15,6 +15,12 @@ class JitCodegen {
 
     var ptrs = new Map<String, Bool>();
     for (f in fns) {
+      if (f.ret == "S") {
+        used = true;
+        needString = true;
+        b.add(strWrapper(f));
+        continue;
+      }
       if (!f.callable) continue;
       used = true;
       if (f.sig.indexOf("S") >= 0) needString = true;
@@ -33,6 +39,7 @@ class JitCodegen {
     if (extra != null) {
       for (s in extra) {
         if (sigs.exists(s) || s.indexOf("(") < 0) continue;
+        if (StringTools.startsWith(s, "S(")) continue;
         sigs.set(s, true);
         used = true;
         if (s.indexOf("S") >= 0) needString = true;
@@ -63,7 +70,12 @@ class JitCodegen {
           b.add('extern "C" RJIT_API double rjit_getf_' + fieldName(v.name, f.name) + '(RJitCtx* ctx, RJitArgs* args) { return (double)' + v.name + '.' + f.name + '; }\n');
           if (!v.isConst) b.add('extern "C" RJIT_API double rjit_setf_' + fieldName(v.name, f.name) + '(RJitCtx* ctx, RJitArgs* args) { ' + v.name + '.' + f.name + ' = (' + f.raw + ')args->a[0]; return (double)' + v.name + '.' + f.name + '; }\n');
         }
+      } else if (v.kind == "ptr") {
+        b.add('extern "C" RJIT_API double rjit_addrv_' + v.name + '(RJitCtx* ctx, RJitArgs* args) { return (double)(size_t)(void*)&' + v.name + '; }\n');
+        b.add('extern "C" RJIT_API double rjit_getv_' + v.name + '(RJitCtx* ctx, RJitArgs* args) { return (double)(size_t)(void*)(' + v.name + '); }\n');
+        if (!v.isConst) b.add('extern "C" RJIT_API double rjit_setv_' + v.name + '(RJitCtx* ctx, RJitArgs* args) { ' + v.name + ' = (decltype(' + v.name + '))(size_t)args->a[0]; return 0.0; }\n');
       } else {
+        b.add('extern "C" RJIT_API double rjit_addrv_' + v.name + '(RJitCtx* ctx, RJitArgs* args) { return (double)(size_t)(void*)&' + v.name + '; }\n');
         b.add('extern "C" RJIT_API double rjit_getv_' + v.name + '(RJitCtx* ctx, RJitArgs* args) { return (double)(' + v.name + '); }\n');
         if (!v.isConst) b.add('extern "C" RJIT_API double rjit_setv_' + v.name + '(RJitCtx* ctx, RJitArgs* args) { ' + v.name + ' = (decltype(' + v.name + '))args->a[0]; return 0.0; }\n');
       }
@@ -149,8 +161,31 @@ class JitCodegen {
       case "l": "long long";
       case "p": "void*";
       case "s": "const char*";
+      case "S": "std::string";
       default: "double";
     };
+  }
+
+  static function strWrapper(f:JitFnInfo):String {
+    var types:Array<String> = [];
+    var expr:Array<String> = [];
+    var numSlot = 0;
+    var strSlot = 0;
+    for (c in f.args) {
+      types.push(cppType(c));
+      if (c == "s" || c == "S") {
+        expr.push(argExpr(c, strSlot, "args"));
+        strSlot++;
+      } else {
+        expr.push(argExpr(c, numSlot, "args"));
+        numSlot++;
+      }
+    }
+    var fnty = "std::string(*)(" + types.join(",") + ")";
+    return 'extern "C" RJIT_API double rjit_str_' + ptrName(f.name, f.sig) + '(RJitCtx* ctx, RJitArgs* args) {\n'
+      + '  std::string r = ((' + fnty + ')&' + f.name + ')(' + expr.join(", ") + ');\n'
+      + '  RJIT_RETSTRN(r.c_str(), (int)r.size());\n'
+      + '  return 0.0;\n}\n';
   }
 
   static function retCast(c:String):String {
@@ -162,9 +197,9 @@ class JitCodegen {
     };
   }
 
-  static function argExpr(c:String, i:Int):String {
-    var raw = "a->a[" + i + "]";
-    var sp = "a->s[" + i + "]";
+  static function argExpr(c:String, i:Int, p:String = "a"):String {
+    var raw = p + "->a[" + i + "]";
+    var sp = p + "->s[" + i + "]";
     return switch (c) {
       case "f": "(float)" + raw;
       case "b": "(bool)" + raw;
@@ -175,7 +210,7 @@ class JitCodegen {
       case "l": "(long long)" + raw;
       case "p": "(void*)(size_t)" + raw;
       case "s": "(" + sp + " != 0 ? " + sp + " : \"\")";
-      case "S": "std::string(" + sp + " != 0 ? " + sp + " : \"\", " + sp + " != 0 ? (size_t)a->sl[" + i + "] : (size_t)0)";
+      case "S": "std::string(" + sp + " != 0 ? " + sp + " : \"\", " + sp + " != 0 ? (size_t)" + p + "->sl[" + i + "] : (size_t)0)";
       default: raw;
     };
   }

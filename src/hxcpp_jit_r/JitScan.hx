@@ -177,13 +177,13 @@ class JitScan {
       if (q < 0) continue;
       var before = StringTools.trim(s.substr(0, p));
       if (before == "" || before.indexOf("=") >= 0 || before.indexOf(".") >= 0) continue;
-      if (before.indexOf("::") >= 0) continue;
       var sp = lastSpace(before);
       if (sp < 0) continue;
       var ret = StringTools.trim(before.substr(0, sp));
       var name = StringTools.trim(before.substr(sp + 1));
       if (!isIdent(name)) continue;
       if (kw.indexOf(name) >= 0) continue;
+      if (name.indexOf("::") >= 0) continue;
       if (kw.indexOf(ret) >= 0) continue;
       if (ret.indexOf("(") >= 0) continue;
       var params = s.substr(p + 1, q - p - 1);
@@ -256,13 +256,18 @@ class JitScan {
         kind = "array";
         elem = c;
         size = sz;
-      } else if (isNumeric(type, nums)) {
-        kind = "num";
       } else {
-        var st = sts.get(StringTools.trim(type));
-        if (st == null) continue;
-        kind = "struct";
-        structName = st.name;
+        if (!isIdent(name)) continue;
+        if (isNumeric(type, nums)) {
+          kind = "num";
+        } else if (isPointerType(type)) {
+          kind = "ptr";
+        } else {
+          var st = sts.get(StringTools.trim(type));
+          if (st == null) continue;
+          kind = "struct";
+          structName = st.name;
+        }
       }
       if (seen.exists(name)) continue;
       seen.set(name, true);
@@ -342,6 +347,20 @@ class JitScan {
     if (s.indexOf("*") >= 0) return false;
     for (n in nums) if (s == n) return true;
     return false;
+  }
+
+  static function isPointerType(t:String):Bool {
+    var s = trimQualifiers(t);
+    if (!StringTools.endsWith(s, "*")) return false;
+    while (StringTools.endsWith(s, "*")) s = StringTools.trim(s.substr(0, s.length - 1));
+    s = StringTools.trim(s);
+    if (s == "") return false;
+    for (i in 0...s.length) {
+      var c = s.charCodeAt(i);
+      if (isIdentChar(c) || c == 58 || c == 60 || c == 62 || c == 32) continue;
+      return false;
+    }
+    return true;
   }
 
   static function isVoid(t:String):Bool {

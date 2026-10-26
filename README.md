@@ -1,6 +1,6 @@
 # HxCpp_JIT_R
 
-Beta 0.0.11
+Beta 0.0.12
 
 Compile and call native C++ while your application is running. Hand it a source string, get a module back, call its functions like any Haxe method.
 
@@ -14,6 +14,8 @@ Behind the call the source goes into a cache directory, is compiled into a share
 - Flat C ABI: compiled code includes no hxcpp headers, only a small C header
 - Automatic signature scanning: plain C++ functions are callable without writing macros
 - `const char*` and `std::string` parameters over a dedicated UTF-8 slot table
+- `std::string` results read back with `callStr`
+- Pointer variables: read, write, repoint, and `&name` for the address
 - Zero-compile reads and writes for globals, struct fields and array elements
 - Bulk array transfer for large buffers (`readDoubles`, `writeDoubles`, `readRaw`, `writeRaw`)
 - `JitSession` keeps numeric, struct and array state across recompiles
@@ -172,9 +174,10 @@ The standard library, inline assembly, SIMD intrinsics and templates all work. T
 | `callA(name, args)` | Variable argument count |
 | `callAuto(name, args, ?strs)` | Convert by scanned signature |
 | `callSig(name, sig, args, ?strs)` | Explicit signature, for overloads |
-| `callStr(name, args):String` | Read the `RJIT_RETSTR` value |
-| `get(path)` / `set(path, v)` | `"n"`, `"p.x"`, `"arr[2]"` |
-| `getVar` / `setVar` | Top-level numeric variables |
+| `callStr(name, args, ?strs):String` | Read an `RJIT_RETSTR` or `std::string` result |
+| `get(path)` / `set(path, v)` | `"n"`, `"&n"`, `"p.x"`, `"arr[2]"` |
+| `addrOf(name)` | Address of a variable |
+| `getVar` / `setVar` | Top-level numeric and pointer variables |
 | `getField` / `setField` / `getIndex` / `setIndex` | Explicit access |
 | `readDoubles` / `writeDoubles` / `readInts` / `writeInts` | Bulk array transfer |
 | `readRaw` / `writeRaw` / `arrayAddress` / `elemSize` | Raw buffer access |
@@ -241,6 +244,15 @@ m.callAuto("joined", [], ["abc", "de"]);  // 5
 m.callAuto("head", [], ["A"]);            // 65
 ```
 
+A function that returns `std::string` is called the same way and read with `callStr`:
+
+```haxe
+var m = Jit.compile("text", 'std::string greet(std::string name) { return "Hello, " + name; }');
+
+m.callStr("greet", [], ["Haxe"]);   // "Hello, Haxe"
+m.callAuto("greet", [], ["Haxe"]);  // 0, the result is a string, use callStr
+```
+
 If the source uses `std::string` without `#include <string>`, one line is prepended and the reported line numbers are shifted back.
 
 ### Structs and arrays
@@ -285,6 +297,30 @@ m.arrayAddress("samples");       // base address, for custom marshalling
 ```
 
 One `memcpy` per call instead of one cross-boundary call per element.
+
+### Pointers
+
+```haxe
+var m = Jit.compile("ptr", '
+int value = 5;
+int other = 9;
+int* ptr = &value;
+int read(int* p) { return *p; }
+int write(int* p, int v) { *p = v; return *p; }
+');
+
+var a = m.get("ptr");              // address of value
+m.get("&value") == a;              // same address, &name works on any variable
+m.callAuto("read", [a]);           // 5
+m.callAuto("write", [a, 42]);      // 42
+m.get("value");                    // 42
+
+m.set("ptr", m.get("&other"));     // repoint
+m.callAuto("read", [m.get("ptr")]); // 9
+m.set("ptr", 0);                   // null
+```
+
+A pointer is an address held in a `Float`. Nothing keeps the target alive, so using an address after the variable is gone is undefined, as in C++. `kindOf("ptr")` returns `"ptr"`.
 
 ### Hand-written exports
 
@@ -426,7 +462,7 @@ if (!m.ok) {
 | `char` | `c` | `const char*` | `s` |
 | `short` | `h` | `std::string` | `S` |
 
-Signatures use `returnCode(argumentCodes)`: `d(dd)`, `i(is)`, `i(SS)`, `v()`.
+Signatures use `returnCode(argumentCodes)`: `d(dd)`, `i(is)`, `i(SS)`, `S(S)`, `v()`.
 
 ```haxe
 m.signature("clamp");            // "d(ddd)"
@@ -484,7 +520,7 @@ Time goes into compiler process startup and linking, not into the amount of code
 ## Limits
 
 - Up to six numeric and four string arguments per call
-- Return values are numeric, pointer or `void`; strings go through `RJIT_RETSTR` / `callStr`
+- Return values are numeric or `void`; pointers come back as addresses and `std::string` results go through `callStr`
 - Structs are passed by address, not by value
 - C++ default arguments are not filled in
 - Overloads resolve to the first match; use `callSig` for the others
@@ -500,7 +536,7 @@ Time goes into compiler process startup and linking, not into the amount of code
 
 ## Testing
 
-`test/` is a standalone console project with 197 assertions.
+`test/` is a standalone console project with 216 assertions.
 
 ```
 cd test
@@ -508,7 +544,7 @@ haxe build.hxml
 bin/Main.exe
 ```
 
-Covers: core calls, diagnostic line numbers, expression offset, automatic signatures, string arguments, struct and array access, bulk transfer, session state, crash isolation and error callback, pointer handle, overload dispatch, concurrency gate, hot reload, file watch, large source, cache hit, cache packaging and import, compiler-less mode, manual mapping and unload, call throughput.
+Covers: core calls, diagnostic line numbers, expression offset, automatic signatures, string arguments, string and `RJIT_RETSTR` results, struct and array access, pointer variables and address-of, bulk transfer, session state, crash isolation and error callback, pointer handle, overload dispatch, concurrency gate, hot reload, file watch, large source, cache hit, cache packaging and import, compiler-less mode, manual mapping and unload, call throughput.
 
 Linux:
 
