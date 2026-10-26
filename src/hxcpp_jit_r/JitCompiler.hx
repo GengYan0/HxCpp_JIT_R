@@ -143,6 +143,22 @@ class JitCompiler {
     var structsAll = [];
     for (t in texts) for (s in JitScan.structs(t)) structsAll.push(s);
     var vars = JitScan.globals(src);
+    var mainStructs = new Map<String, Bool>();
+    for (x in JitScan.structs(src)) mainStructs.set(x.name, true);
+    var seenVar = new Map<String, Bool>();
+    for (v in vars) seenVar.set(v.name, true);
+    if (multi != null) {
+      for (t in multi.texts) {
+        for (v in JitScan.globals(t)) {
+          if (seenVar.exists(v.name) || v.isConst || v.isStatic) continue;
+          var d = varDecl(v, mainStructs);
+          if (d == null) continue;
+          seenVar.set(v.name, true);
+          externs.push(d);
+          vars.push(v);
+        }
+      }
+    }
     var tail = JitCodegen.emit(fns, vars, sigs, structsAll, externs);
     var pre = needsStringHeader(texts.join("\n")) ? "#include <string>\n" : "";
     var shift = lineShift + (pre == "" ? 0 : 1);
@@ -164,6 +180,16 @@ class JitCompiler {
       log: log,
       diag: parse(log, shift),
       ms: (Sys.time() - t0) * 1000.0
+    };
+  }
+
+  public static function varDecl(v:JitScan.JitVarInfo, mainStructs:Map<String, Bool>):String {
+    return switch (v.kind) {
+      case "num", "ptr": v.type + " " + v.name;
+      case "array": v.type + " " + v.name + "[" + v.size + "]";
+      case "struct": mainStructs.exists(v.structName) ? v.structName + " " + v.name : null;
+      case "structarray": mainStructs.exists(v.structName) ? v.structName + " " + v.name + "[" + v.size + "]" : null;
+      default: null;
     };
   }
 

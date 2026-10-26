@@ -5,8 +5,13 @@ import hxcpp_jit_r.JitScan.JitVarInfo;
 import hxcpp_jit_r.JitScan.JitStructInfo;
 import hxcpp_jit_r.JitScan.JitFieldInfo;
 
+typedef JitLeaf = {
+  var path:String;
+  var type:String;
+}
+
 class JitCodegen {
-  public static inline var BUILD:Int = 10;
+  public static inline var BUILD:Int = 11;
   public static inline var MAX_DEPTH:Int = 3;
 
   public static function emit(fns:Array<JitFnInfo>, vars:Array<JitVarInfo>, extra:Array<String> = null, structs:Array<JitStructInfo> = null, externs:Array<String> = null):String {
@@ -76,30 +81,32 @@ class JitCodegen {
       } else if (v.kind == "struct") {
         var st = stMap.get(v.structName);
         if (st == null) continue;
+        b.add('extern "C" RJIT_API double rjit_addrv_' + v.name + '(RJitCtx* ctx, RJitArgs* args) { return (double)(size_t)(void*)&' + v.name + '; }\n');
         b.add('extern "C" RJIT_API double rjit_szof_' + v.name + '(RJitCtx* ctx, RJitArgs* args) { return (double)sizeof(' + v.name + '); }\n');
-        for (p in leafPaths(stMap, v.structName)) {
-          var fn = v.name + "__" + p.split(".").join("__");
-          var acc = v.name + "." + p;
-          b.add('extern "C" RJIT_API double rjit_getf_' + fn + '(RJitCtx* ctx, RJitArgs* args) { return (double)' + acc + '; }\n');
-          if (!v.isConst) b.add('extern "C" RJIT_API double rjit_setf_' + fn + '(RJitCtx* ctx, RJitArgs* args) { ' + acc + ' = (decltype(' + acc + '))args->a[0]; return (double)' + acc + '; }\n');
+        for (l in leafList(stMap, v.structName)) {
+          var fn = v.name + "__" + l.path.split(".").join("__");
+          var acc = v.name + "." + l.path;
+          b.add('extern "C" RJIT_API double rjit_getf_' + fn + '(RJitCtx* ctx, RJitArgs* args) { return ' + getExpr(l.type, acc) + '; }\n');
+          if (!v.isConst) b.add('extern "C" RJIT_API double rjit_setf_' + fn + '(RJitCtx* ctx, RJitArgs* args) { ' + acc + ' = ' + setExpr(l.type, acc) + '; return ' + getExpr(l.type, acc) + '; }\n');
         }
       } else if (v.kind == "structarray") {
         var st = stMap.get(v.structName);
         if (st == null) continue;
         b.add('extern "C" RJIT_API double rjit_addra_' + v.name + '(RJitCtx* ctx, RJitArgs* args) { return (double)(size_t)(void*)&' + v.name + '[0]; }\n');
+        b.add('extern "C" RJIT_API double rjit_addrv_' + v.name + '(RJitCtx* ctx, RJitArgs* args) { return (double)(size_t)(void*)&' + v.name + '[0]; }\n');
         b.add('extern "C" RJIT_API double rjit_szof_' + v.name + '(RJitCtx* ctx, RJitArgs* args) { return (double)sizeof(' + v.name + '[0]); }\n');
-        for (p in leafPaths(stMap, v.structName)) {
-          var fn = v.name + "__" + p.split(".").join("__");
-          var acc = v.name + '[i].' + p;
+        for (l in leafList(stMap, v.structName)) {
+          var fn = v.name + "__" + l.path.split(".").join("__");
+          var acc = v.name + '[i].' + l.path;
           b.add('extern "C" RJIT_API double rjit_getfa_' + fn + '(RJitCtx* ctx, RJitArgs* args) {\n'
             + '  int i = (int)args->a[0];\n'
             + '  if (i < 0 || i >= ' + v.size + ') return 0.0;\n'
-            + '  return (double)' + acc + ';\n}\n');
+            + '  return ' + getExpr(l.type, acc) + ';\n}\n');
           if (!v.isConst) b.add('extern "C" RJIT_API double rjit_setfa_' + fn + '(RJitCtx* ctx, RJitArgs* args) {\n'
             + '  int i = (int)args->a[0];\n'
             + '  if (i < 0 || i >= ' + v.size + ') return 0.0;\n'
-            + '  ' + acc + ' = (decltype(' + acc + '))args->a[1];\n'
-            + '  return (double)' + acc + ';\n}\n');
+            + '  ' + acc + ' = ' + setExpr(l.type, acc) + ';\n'
+            + '  return ' + getExpr(l.type, acc) + ';\n}\n');
         }
       } else if (v.kind == "ptr") {
         b.add('extern "C" RJIT_API double rjit_addrv_' + v.name + '(RJitCtx* ctx, RJitArgs* args) { return (double)(size_t)(void*)&' + v.name + '; }\n');
@@ -117,20 +124,33 @@ class JitCodegen {
     return head + b.toString();
   }
 
-  public static function leafPaths(stMap:Map<String, JitStructInfo>, sname:String, prefix:String = "", depth:Int = 0):Array<String> {
-    var out:Array<String> = [];
+  public static function leafList(stMap:Map<String, JitStructInfo>, sname:String, prefix:String = "", depth:Int = 0):Array<JitLeaf> {
+    var out:Array<JitLeaf> = [];
     if (depth >= MAX_DEPTH) return out;
     var st = stMap.get(sname);
     if (st == null) return out;
     for (f in st.fields) {
       var path = prefix == "" ? f.name : prefix + "." + f.name;
       if (f.nested != "") {
-        for (q in leafPaths(stMap, f.nested, path, depth + 1)) out.push(q);
+        for (q in leafList(stMap, f.nested, path, depth + 1)) out.push(q);
       } else {
-        out.push(path);
+        out.push({path: path, type: f.type});
       }
     }
     return out;
+  }
+
+  public static function leafPaths(stMap:Map<String, JitStructInfo>, sname:String, prefix:String = "", depth:Int = 0):Array<String> {
+    return [for (l in leafList(stMap, sname, prefix, depth)) l.path];
+  }
+
+  public static function getExpr(t:String, acc:String):String {
+    return (t == "p" || t == "s") ? "(double)(size_t)(void*)(" + acc + ")" : "(double)(" + acc + ")";
+  }
+
+  public static function setExpr(t:String, acc:String):String {
+    var slot = acc.indexOf("[i]") >= 0 ? 1 : 0;
+    return "(decltype(" + acc + "))" + ((t == "p" || t == "s") ? "(size_t)" : "") + "args->a[" + slot + "]";
   }
 
   public static function fieldName(v:String, f:String):String {

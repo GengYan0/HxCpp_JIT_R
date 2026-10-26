@@ -15,6 +15,7 @@ typedef JitVarInfo = {
   var name:String;
   var type:String;
   var isConst:Bool;
+  var isStatic:Bool;
   var kind:String;
   var elem:String;
   var size:Int;
@@ -164,8 +165,7 @@ class JitScan {
           fields.push({name: fn, type: "struct", raw: ty, nested: tq});
           continue;
         }
-        if (c == "?" || c == "v") continue;
-        if (c == "p" || c == "s" || c == "S") continue;
+        if (c == "?" || c == "v" || c == "S") continue;
         fields.push({name: fn, type: c, raw: ty, nested: ""});
       }
       if (fields.length > 0) out.push({name: d.name, fields: fields});
@@ -220,7 +220,7 @@ class JitScan {
       var rc = code(ret);
       if (rc == "v" && !isVoid(ret)) ok = false;
       if (rc == "?") ok = false;
-      if (rc == "s" || rc == "S") ok = false;
+      if (rc == "S") ok = false;
       var sig = rc + "(" + args.join("") + ")";
       var local = ret.indexOf("static") >= 0 || ret.indexOf("inline") >= 0;
       out.push({name: name, ret: rc, args: args, sig: sig, callable: ok, rawRet: ret, rawArgs: rawArgs, isStatic: local});
@@ -252,6 +252,7 @@ class JitScan {
         if (eq >= 0) decl = StringTools.trim(decl.substr(0, eq));
         if (decl.indexOf("{") >= 0 || decl.indexOf("}") >= 0) continue;
         var isConst = decl.indexOf("const") >= 0;
+        var isStatic = decl.indexOf("static") >= 0 || decl.indexOf("extern") >= 0;
         decl = trimQualifiers(decl);
         var sp = lastSpace(decl);
         if (sp < 0) continue;
@@ -297,7 +298,7 @@ class JitScan {
         }
         if (seen.exists(name)) continue;
         seen.set(name, true);
-        out.push({name: name, type: type, isConst: isConst, kind: kind, elem: elem, size: size, structName: structName});
+        out.push({name: name, type: type, isConst: isConst, isStatic: isStatic, kind: kind, elem: elem, size: size, structName: structName});
       }
     }
     return out;

@@ -514,6 +514,15 @@ class JitNative {
   @:functionCode('memcpy((void*)(size_t)dst, (const void*)(size_t)src, (size_t)len);')
   public static function memcpyRaw(dst:cpp.SizeT, src:cpp.SizeT, len:Int):Void {}
 
+  @:functionCode('
+    if (p == 0) return ::String("");
+    const char* s = (const char*)(size_t)p;
+    int n = 0;
+    while (n < max && s[n] != 0) n++;
+    return ::String::create(s, n);
+  ')
+  public static function readCStr(p:cpp.SizeT, max:Int = 4096):String return null;
+
   @:functionCode('if (p != 0 && len > 0) memset((void*)(size_t)p, 0, (size_t)len);')
   public static function memzero(p:cpp.SizeT, len:Int):Void {}
 

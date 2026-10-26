@@ -19,6 +19,11 @@ class JitPtr {
     return address != 0.0 && JitNative.isReadable(JitNative.toSizeT(address)) != 0;
   }
 
+  public function readStr(max:Int = 4096):String {
+    if (address == 0.0) return "";
+    return JitNative.readCStr(JitNative.toSizeT(address), max);
+  }
+
   public function readF64(at:Float = 0.0):Float {
     return address == 0.0 ? 0.0 : JitNative.readF64(JitNative.toSizeT(address + at));
   }

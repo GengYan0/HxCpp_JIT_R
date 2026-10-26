@@ -1,6 +1,6 @@
 # HxCpp_JIT_R
 
-Beta 0.0.13
+Beta 0.0.14
 
 Compile and call native C++ while your application is running. Hand it a source string, get a module back, call its functions like any Haxe method.
 
@@ -16,11 +16,14 @@ Behind the call the source goes into a cache directory, is compiled into a share
 - `const char*` and `std::string` parameters over a dedicated UTF-8 slot table
 - `std::string` results read back with `callStr`
 - Pointer variables: read, write, repoint, and `&name` for the address
+- Pointer and `const char*` members of structs, walked with `JitPtr` and decoded with `str()`
+- `const char*` results read straight back by `callStr`
 - Zero-compile reads and writes for globals, struct fields and array elements
+- Handles resolved once at load, so the call path never reaches the symbol table
 - Struct arrays and nested fields: `pts[2].x`, `box.pos.x`, any depth up to three
 - Expression evaluation against live module state: `m.expr("p.x + p.y")`
 - Bound handles: `m.bind(name)` resolves the symbol and signature once, then calls at 0.015 us
-- Multiple translation units per module with local `#include` search paths
+- Multiple translation units per module with local `#include` search paths, including their globals
 - Bulk array transfer for large buffers (`readDoubles`, `writeDoubles`, `readRaw`, `writeRaw`)
 - `JitSession` keeps numeric, struct and array state across recompiles
 - Hot reload with a three-frame deferred unload, plus `Jit.watch` file polling
@@ -177,12 +180,13 @@ The standard library, inline assembly, SIMD intrinsics and templates all work. T
 | `call(name, a0..a5):Float` | Six `double` arguments, guarded |
 | `callFast(name, a0..a5):Float` | Same, without the SEH guard |
 | `callA(name, args)` | Variable argument count |
-| `callAuto(name, args, ?strs)` | Convert by scanned signature |
+| `callAuto(name, args, ?strs)` | Convert by scanned signature, picking the overload by argument count |
 | `callSig(name, sig, args, ?strs)` | Explicit signature, for overloads |
 | `callStr(name, args, ?strs):String` | Read an `RJIT_RETSTR` or `std::string` result |
 | `bind(name, ?sig):JitFn` | Resolve the symbol once, then call through the handle |
 | `expr(code):Float` | Evaluate an expression against live module state |
 | `get(path)` / `set(path, v)` | `"n"`, `"&n"`, `"p.x"`, `"arr[2]"`, `"pts[2].x"`, `"box.pos.x"` |
+| `str(path)` | Read a `const char*` member at the address the path holds |
 | `addrOf(name)` | Address of a variable |
 | `getVar` / `setVar` | Top-level numeric and pointer variables |
 | `getField` / `setField` / `getIndex` / `setIndex` | Explicit access |
@@ -192,6 +196,7 @@ The standard library, inline assembly, SIMD intrinsics and templates all work. T
 | `kindOf(name)` / `fieldsOf(name)` / `leafFieldsOf(name)` / `arraySize(name)` | Variable info |
 | `signature(name)` / `signatures(name)` / `hasSig(sig)` | Signature info |
 | `address(name)` / `ptr(name)` | Function address / `JitPtr` |
+| `pick(name, nums, strs)` / `warm()` | Overload choice and cache prefill |
 | `has(name)` / `report()` / `dispose()` | Misc |
 
 ### JitPtr
@@ -201,6 +206,7 @@ The standard library, inline assembly, SIMD intrinsics and templates all work. T
 | `address` / `isNull()` | Raw address and null check |
 | `valid()` | Address is non-null and readable |
 | `offset(delta)` | New handle at `address + delta` |
+| `readStr(max)` | Read a null-terminated string at the address |
 | `readF64(at)` / `readF32(at)` | Read a `double` / `float` |
 | `readI32(at)` / `readU16(at)` / `readU8(at)` | Read integers |
 | `writeF64(v, at)` / `writeF32(v, at)` / `writeI32(v, at)` | Write |
@@ -321,6 +327,30 @@ m.elemSize("trail");        // 16, sizeof(Vec2)
 
 Field paths resolve through any struct nesting up to three levels. Every accessor is generated for the leaf fields only, so the index and the bounds check stay in native code and nothing is interpreted per call.
 
+Pointer and `const char*` members come back as addresses, so a linked structure can be walked from Haxe:
+
+```haxe
+var m = Jit.compile("list", '
+struct Node { double v; Node* next; const char* label; };
+Node head; Node tail;
+void build() { head.v = 1; tail.v = 2; head.next = &tail; tail.next = 0; head.label = "head"; tail.label = "tail"; }
+');
+
+m.callAuto("build", []);
+m.get("head.next");                                 // address of tail
+new JitPtr(m.get("head.next")).readF64();           // 2, first member
+m.str("head.label");                                // "head"
+m.str("tail.label");                                // "tail"
+m.get("tail.next");                                 // 0
+m.set("tail.next", m.get("&head"));                 // repoint
+```
+
+A function that returns `const char*` is callable like any other and read through the same path:
+
+```haxe
+m.callStr("label_of", [2]);
+```
+
 ### Expressions
 
 ```haxe
@@ -383,6 +413,24 @@ m.callAuto("twice", [4]);    // 8, declared automatically
 ```
 
 The main file keeps its globals and state; the other files are compiled and linked into the same image. Their functions are declared in the generated wrapper, so they stay callable without writing anything by hand. A file listed but missing makes the module fail with `E_NOFILE` instead of silently dropping it.
+
+Globals defined in a secondary file are visible too, as long as they have external linkage:
+
+```haxe
+// extra.cpp
+struct P { double x; double y; };
+double counter = 5;
+int hits[3] = {1, 2, 3};
+P anchor = {7, 8};
+
+// Haxe
+m.get("counter");      // 5
+m.set("counter", 9);
+m.get("hits[1]");      // 2
+m.get("anchor.y");     // 8
+```
+
+`const` and `static` globals stay private to their unit, and a struct-typed one needs the struct declared in the main unit so the generated declaration compiles.
 
 Functions in secondary files must have external linkage; `static` and `inline` definitions stay local to their unit.
 
@@ -637,9 +685,9 @@ Time goes into compiler process startup and linking, not into the amount of code
 - Compilation needs a local compiler; target machines fall back to the cache
 - SEH catches hardware exceptions only; C++ exceptions across the boundary are undefined
 - Build timeout terminates the compiler process
-- Struct accessors cover numeric leaf fields up to three levels of nesting; pointer and string members need a helper function
+- Struct accessors cover leaf fields up to three levels of nesting, including pointer and `const char*` members; `std::string` members need a helper function
 - Manual mapping handles PE on Windows and ELF64 on Linux; other formats use the system loader
-- A module has one main translation unit; secondary units cannot contribute globals to `get` and `set`
+- Globals in secondary units are exposed, but a struct-typed one needs the struct declared in the main unit
 - ELF manual mapping does not process thread-local storage; the system loader does
 - Changing the ABI header layout requires clearing the host precompiled header and rebuilding
 
@@ -647,7 +695,7 @@ Time goes into compiler process startup and linking, not into the amount of code
 
 ## Testing
 
-`test/` is a standalone console project with 268 assertions.
+`test/` is a standalone console project with 297 assertions.
 
 ```
 cd test
@@ -655,7 +703,7 @@ haxe build.hxml
 bin/Main.exe
 ```
 
-Covers: core calls, diagnostic line numbers, expression offset, automatic signatures, string arguments, string and `RJIT_RETSTR` results, struct and array access, struct arrays and nested fields, expressions, bound handles, multiple translation units, pointer variables and address-of, bulk transfer, session state including struct arrays, crash isolation and error callback, pointer handle, overload dispatch, concurrency gate, hot reload, file watch, large source, cache hit, cache packaging and import, compiler-less mode, manual mapping and unload, ELF header parsing, call throughput.
+Covers: core calls, diagnostic line numbers, expression offset, automatic signatures, string arguments, string and `RJIT_RETSTR` results, struct and array access, struct arrays and nested fields, pointer and string members, expressions, bound handles, overlapping signatures, multiple translation units and their globals, pointer variables and address-of, bulk transfer, session state including struct arrays, crash isolation and error callback, pointer handle, overload dispatch, concurrency gate, hot reload, file watch, large source, cache hit, cache packaging and import, compiler-less mode, manual mapping and unload, ELF header parsing, call throughput.
 
 Linux:
 

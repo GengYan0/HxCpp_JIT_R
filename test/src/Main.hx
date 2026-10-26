@@ -4,6 +4,7 @@ import hxcpp_jit_r.JitNative;
 import hxcpp_jit_r.JitSession;
 import hxcpp_jit_r.JitCompiler;
 import hxcpp_jit_r.JitElf;
+import hxcpp_jit_r.JitPtr;
 
 class Main {
   static var pass = 0;
@@ -576,6 +577,28 @@ double peekx() { return path[1].x; }
     eq("session element restored", Std.string(ssa.get("path[1].x")), "42");
     eq("session element seen natively", Std.string(ssa.module.callAuto("peekx", [])), "42");
 
+    head("pointer and string members");
+    var ps = Jit.compile("members", '
+struct Node { double v; Node* next; const char* name; };
+Node na; Node nb;
+void link() { na.v = 1; nb.v = 2; na.next = &nb; nb.next = 0; na.name = "root"; nb.name = "leaf"; }
+const char* greeting() { return "hello"; }
+');
+    ok("member module compiles", ps.ok, ps.diag.length > 0 ? JitCompiler.describe(ps.diag[0]) : "");
+    ps.callAuto("link", []);
+    eq("pointer member set", Std.string(ps.get("na.next") != 0), "true");
+    eq("pointer member walk", Std.string(new JitPtr(ps.get("na.next")).readF64()), "2");
+    eq("pointer member null", Std.string(ps.get("nb.next")), "0");
+    ok("pointer member write", ps.set("nb.next", ps.get("&na")), "");
+    eq("pointer member write back", Std.string(new JitPtr(ps.get("nb.next")).readF64()), "1");
+    eq("string member read", ps.str("na.name"), "root");
+    eq("string member second", ps.str("nb.name"), "leaf");
+    eq("struct address", Std.string(ps.get("&na") != 0), "true");
+    eq("string return is address", Std.string(ps.callAuto("greeting", []) != 0), "true");
+    eq("string return value", ps.callStr("greeting"), "hello");
+    eq("pointer read string", new JitPtr(ps.callAuto("greeting", [])).readStr(), "hello");
+    eq("string member missing is empty", ps.str("na.nosuch"), "");
+
     head("expressions");
     var ex = Jit.compile("exprm", "
 double ax = 3; double ay = 4;
@@ -592,6 +615,22 @@ double ax = 3; double ay = 4;
     ok("expr unknown is nan", ex.expr("nope + 1") != ex.expr("nope + 1"), "");
     ok("expr divide by zero is nan", ex.expr("ax / 0") != ex.expr("ax / 0"), "");
     ok("expr trailing junk is nan", ex.expr("ax +") != ex.expr("ax +"), "");
+
+    var ef = Jit.compile("exprfn", "double scale(double v, double k) { return v * k; }
+double base = 2;
+");
+    ok("expr function module", ef.ok, "");
+    eq("expr calls module function", Std.string(ef.expr("scale(3, 4)")), "12");
+    eq("expr mixes function and variable", Std.string(ef.expr("scale(base, 2) + 1")), "5");
+    ok("expr unknown function is nan", ef.expr("nosuch(1)") != ef.expr("nosuch(1)"), "");
+
+    var ov = Jit.compile("overloads", "double pick1(double v) { return v + 1; }
+double pick1(double a, double b) { return a * b; }
+");
+    ok("overload module", ov.ok, ov.diag.length > 0 ? JitCompiler.describe(ov.diag[0]) : "");
+    eq("overload one argument", Std.string(ov.callAuto("pick1", [3])), "4");
+    eq("overload two arguments", Std.string(ov.callAuto("pick1", [3, 4])), "12");
+    eq("overload explicit sig", Std.string(ov.callSig("pick1", "d(dd)", [3, 4])), "12");
 
     head("bound handles");
     var bh = Jit.compile("bound", "double add(double a, double b) { return a + b; }\ndouble twice(double v) { return v * 2; }\n");
@@ -623,6 +662,25 @@ double ax = 3; double ay = 4;
     ok("multi file lists both", mm.fnNames().indexOf("twice") >= 0 && mm.fnNames().indexOf("quad") >= 0, mm.fnNames().join(","));
     var rm = Jit.reload("multi");
     ok("multi file reload keeps units", rm != null && rm.ok && rm.callAuto("twice", [5]) == 10, rm == null ? "null" : "ok=" + rm.ok);
+
+    sys.io.File.saveContent(mdir + "/gmain.cpp", "struct P { double x; double y; };
+double quad(double v) { return v * 2; }
+");
+    sys.io.File.saveContent(mdir + "/gextra.cpp", "struct P { double x; double y; };
+double counter = 5;
+int hits[3] = {1,2,3};
+P anchor = {7,8};
+double alive() { return counter + hits[1]; }
+");
+    var mg = Jit.compileFiles("multiglob", mdir + "/gmain.cpp", [mdir + "/gextra.cpp"]);
+    ok("extra unit globals compile", mg.ok, mg.diag.length > 0 ? JitCompiler.describe(mg.diag[0]) : "");
+    eq("extra scalar read", Std.string(mg.get("counter")), "5");
+    ok("extra scalar write", mg.set("counter", 9), "");
+    eq("extra scalar seen natively", Std.string(mg.callAuto("alive", [])), "11");
+    eq("extra array element", Std.string(mg.get("hits[1]")), "2");
+    ok("extra array write", mg.set("hits[2]", 40), "");
+    eq("extra array write back", Std.string(mg.get("hits[2]")), "40");
+    eq("extra struct field", Std.string(mg.get("anchor.y")), "8");
 
     head("elf parser");
     var eb = haxe.io.Bytes.alloc(120);

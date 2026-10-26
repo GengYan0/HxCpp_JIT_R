@@ -10,8 +10,8 @@ class JitExpr {
     return false;
   }
 
-  public static function eval(src:String, resolve:String->Float):Float {
-    var p = new JitExprParser(src, resolve);
+  public static function eval(src:String, resolve:String->Float, ?invoke:String->Array<Float>->Float):Float {
+    var p = new JitExprParser(src, resolve, invoke);
     var v = p.parseExpr();
     p.skip();
     if (!p.atEnd()) return Math.NaN;
@@ -24,12 +24,14 @@ class JitExprParser {
   var i:Int;
   var n:Int;
   var res:String->Float;
+  var inv:String->Array<Float>->Float;
 
-  public function new(src:String, resolve:String->Float) {
+  public function new(src:String, resolve:String->Float, ?invoke:String->Array<Float>->Float) {
     s = src;
     i = 0;
     n = src.length;
     res = resolve;
+    inv = invoke;
   }
 
   public function atEnd():Bool {
@@ -264,6 +266,10 @@ class JitExprParser {
   }
 
   function callFn(name:String, a:Array<Float>):Float {
+    if (inv != null) {
+      var r = inv(name, a);
+      if (r == r) return r;
+    }
     for (v in a) if (v != v) return Math.NaN;
     return switch (name) {
       case "abs": Math.abs(a[0]);
