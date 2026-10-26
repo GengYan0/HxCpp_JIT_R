@@ -30,6 +30,11 @@ class JitCodegen {
 
     var ptrs = new Map<String, Bool>();
     for (f in fns) {
+      if (f.ret == "t") {
+        used = true;
+        b.add(retWrapper(f));
+        continue;
+      }
       if (f.ret == "S") {
         used = true;
         needString = true;
@@ -203,6 +208,39 @@ class JitCodegen {
     var body = "((" + fnty + ")f)(" + expr.join(", ") + ")";
     var call = ret == "v" ? body + "; return 0.0;" : "return " + retCast(ret) + body + ";";
     return 'extern "C" RJIT_API double ' + name + '(void* f, RJitArgs* a) { ' + call + ' }\n';
+  }
+
+  public static function retWrapper(f:JitFnInfo):String {
+    var types:Array<String> = [];
+    var expr:Array<String> = [];
+    var numSlot = 0;
+    var strSlot = 0;
+    for (i in 0...f.args.length) {
+      var c = f.args[i];
+      var raw = f.rawArgs != null && i < f.rawArgs.length ? StringTools.trim(f.rawArgs[i]) : null;
+      if (c == "t" && raw != null && raw != "") {
+        types.push(raw);
+        expr.push("*((" + raw + "*)(size_t)args->a[" + numSlot + "])");
+        numSlot++;
+      } else if (c == "s" || c == "S") {
+        types.push(cppType(c));
+        expr.push(argExpr(c, strSlot, "args"));
+        strSlot++;
+      } else {
+        types.push(cppType(c));
+        expr.push(argExpr(c, numSlot, "args"));
+        numSlot++;
+      }
+    }
+    var rawRet = StringTools.trim(f.rawRet);
+    while (StringTools.startsWith(rawRet, "static ")) rawRet = StringTools.trim(rawRet.substr(7));
+    while (StringTools.startsWith(rawRet, "inline ")) rawRet = StringTools.trim(rawRet.substr(7));
+    var fnty = rawRet + "(*)(" + types.join(",") + ")";
+    return 'extern "C" RJIT_API double rjit_ret_' + ptrName(f.name, f.sig) + '(RJitCtx* ctx, RJitArgs* args) {' + "\n"
+      + '  static ' + rawRet + ' rjit_buf;' + "\n"
+      + '  rjit_buf = ((' + fnty + ')&' + f.name + ')(' + expr.join(", ") + ');' + "\n"
+      + '  return (double)(size_t)(void*)&rjit_buf;' + "\n"
+      + '}' + "\n";
   }
 
   public static function dispatcherFor(f:JitFnInfo):String {

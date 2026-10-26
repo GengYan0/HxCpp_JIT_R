@@ -222,6 +222,7 @@ class JitScan {
       if (strArgs > 4) ok = false;
       var rc = code(ret);
       if (rc == "v" && !isVoid(ret)) ok = false;
+      if (rc == "?" && sts.exists(trimQualifiers(ret))) rc = "t";
       if (rc == "?") ok = false;
       if (rc == "S") ok = false;
       var sig = rc + "(" + args.join("") + ")";

@@ -606,6 +606,7 @@ Vec2 gv;
 void setv(double x, double y) { gv.x = x; gv.y = y; }
 double len2(Vec2 v) { return v.x + v.y; }
 double scale2(Vec2 v, double k) { return (v.x + v.y) * k; }
+Vec2 mk(double x, double y) { Vec2 r; r.x = x; r.y = y; return r; }
 ');
     ok("by value module compiles", bv.ok, bv.diag.length > 0 ? JitCompiler.describe(bv.diag[0]) : "");
     bv.callAuto("setv", [3, 4]);
@@ -613,6 +614,11 @@ double scale2(Vec2 v, double k) { return (v.x + v.y) * k; }
     eq("by value with scalar", Std.string(bv.callAuto("scale2", [bv.get("&gv"), 2])), "14");
     eq("by value via explicit sig", Std.string(bv.callSig("len2", "d(t)", [bv.get("&gv")])), "7");
     ok("by value bound handle", Std.string(bv.bind("len2").call(bv.get("&gv"))) == "7", "");
+    var rv = bv.callStruct("mk", [5, 6]);
+    eq("struct return x", Std.string(rv.readF64(0)), "5");
+    eq("struct return y", Std.string(rv.readF64(8)), "6");
+    eq("struct return through callAuto", Std.string(bv.callAuto("mk", [7, 8]) != 0), "true");
+    eq("struct return second field", Std.string(new JitPtr(bv.callAuto("mk", [9, 10])).readF64(8)), "10");
 
     head("expressions");
     var ex = Jit.compile("exprm", "

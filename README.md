@@ -1,6 +1,6 @@
 # HxCpp_JIT_R
 
-Beta 0.0.15
+Beta 0.0.16
 
 Compile and call native C++ while your application is running. Hand it a source string, get a module back, call its functions like any Haxe method.
 
@@ -17,7 +17,7 @@ Behind the call the source goes into a cache directory, is compiled into a share
 - `std::string` results read back with `callStr`
 - Pointer variables: read, write, repoint, and `&name` for the address
 - Pointer and `const char*` members of structs, walked with `JitPtr` and decoded with `str()`
-- Struct parameters by value: pass the address, the generated dispatcher dereferences it
+- Struct parameters and results by value: pass the address in, read the result through a handle
 - `const char*` results read straight back by `callStr`
 - Zero-compile reads and writes for globals, struct fields and array elements
 - Handles resolved once at load, so the call path never reaches the symbol table
@@ -188,6 +188,7 @@ The standard library, inline assembly, SIMD intrinsics and templates all work. T
 | `expr(code):Float` | Evaluate an expression against live module state |
 | `get(path)` / `set(path, v)` | `"n"`, `"&n"`, `"p.x"`, `"arr[2]"`, `"pts[2].x"`, `"box.pos.x"` |
 | `str(path)` | Read a `const char*` member at the address the path holds |
+| `callStruct(name, args):JitPtr` | Call a function that returns a struct by value |
 | `addrOf(name)` | Address of a variable |
 | `getVar` / `setVar` | Top-level numeric and pointer variables |
 | `getField` / `setField` / `getIndex` / `setIndex` | Explicit access |
@@ -367,7 +368,20 @@ m.callAuto("len2", [m.get("&gv")]);   // 7
 m.bind("len2").call(m.get("&gv"));    // 7
 ```
 
-The signature shows the struct as `t`, so `m.callSig("len2", "d(t)", [addr])` also works. Struct results by value are not returned through the boundary; write into an out pointer instead.
+The signature shows the struct as `t`, so `m.callSig("len2", "d(t)", [addr])` also works.
+
+A function that returns a struct by value is called the same way; the result arrives as a handle:
+
+```haxe
+struct Vec2 { double x; double y; };
+Vec2 mk(double x, double y) { Vec2 r; r.x = x; r.y = y; return r; }
+
+var p = m.callStruct("mk", [5, 6]);
+p.readF64(0);   // 5
+p.readF64(8);   // 6
+```
+
+The buffer behind the handle belongs to the function, so the next call to the same function overwrites it. Copy what you need, or keep a different function per slot.
 
 ### Expressions
 
@@ -696,7 +710,8 @@ Time goes into compiler process startup and linking, not into the amount of code
 
 - Up to six numeric and four string arguments per call
 - Return values are numeric or `void`; pointers come back as addresses and `std::string` results go through `callStr`
-- Struct parameters can be passed by value; struct results by value need a wrapper that writes to an out parameter
+- Struct results by value land in a per function buffer that the next call to that function overwrites; copy it out before calling again
+- Struct parameters that are references (`const Vec2&`) are not recognised and need a wrapper
 - C++ default arguments are not filled in
 - Overloads resolve to the first match; use `callSig` for the others
 - Every guarded call costs an indirect jump; `callFast` removes the SEH guard but also removes crash containment
@@ -713,7 +728,7 @@ Time goes into compiler process startup and linking, not into the amount of code
 
 ## Testing
 
-`test/` is a standalone console project with 302 assertions.
+`test/` is a standalone console project with 306 assertions.
 
 ```
 cd test
@@ -721,7 +736,7 @@ haxe build.hxml
 bin/Main.exe
 ```
 
-Covers: core calls, diagnostic line numbers, expression offset, automatic signatures, string arguments, string and `RJIT_RETSTR` results, struct and array access, struct arrays and nested fields, pointer and string members, expressions, bound handles, overlapping signatures, struct parameters by value, multiple translation units and their globals, pointer variables and address-of, bulk transfer, session state including struct arrays, crash isolation and error callback, pointer handle, overload dispatch, concurrency gate, hot reload, file watch, large source, cache hit, cache packaging and import, compiler-less mode, manual mapping and unload, ELF header parsing, call throughput.
+Covers: core calls, diagnostic line numbers, expression offset, automatic signatures, string arguments, string and `RJIT_RETSTR` results, struct and array access, struct arrays and nested fields, pointer and string members, expressions, bound handles, overlapping signatures, struct parameters and results by value, multiple translation units and their globals, pointer variables and address-of, bulk transfer, session state including struct arrays, crash isolation and error callback, pointer handle, overload dispatch, concurrency gate, hot reload, file watch, large source, cache hit, cache packaging and import, compiler-less mode, manual mapping and unload, ELF header parsing, call throughput.
 
 Linux:
 

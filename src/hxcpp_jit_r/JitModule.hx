@@ -566,6 +566,7 @@ class JitModule {
   public function callAuto(n:String, args:Array<Float>, ?strs:Array<String>):Float {
     var f = pick(n, args == null ? 0 : args.length, strs == null ? 0 : strs.length);
     if (f == null || !f.callable || handle == 0) return callA(n, args);
+    if (f.ret == "t") return callStruct(n, args, strs).address;
     var fp = ptrOf(n, f.sig);
     if (fp == 0) fp = resolve("rjit_ptr_" + n);
     if (fp == 0) return callA(n, args);
@@ -678,6 +679,23 @@ class JitModule {
     }
     callA(n, args == null ? [] : args);
     return JitHost.takeRet(id);
+  }
+
+  public function callStruct(n:String, args:Array<Float> = null, ?strs:Array<String>):JitPtr {
+    var f = fns.get(n);
+    if (f == null || f.ret != "t" || handle == 0) return new JitPtr(0);
+    var ar = args == null ? [] : args;
+    var k = "ret|" + n + "|" + f.sig;
+    var cached = pre.get(k);
+    var p:cpp.SizeT = cached == null ? resolve("rjit_ret_" + JitCodegen.ptrName(n, f.sig)) : JitNative.toSizeT(cached);
+    if (cached == null && p != 0) pre.set(k, JitNative.toFloat(p));
+    if (p == 0) return new JitPtr(0);
+    calls++;
+    var r = f.sig.indexOf("s") >= 0
+      ? JitNative.invokeB(p, ctx, ar.length, a(ar, 0), a(ar, 1), a(ar, 2), a(ar, 3), a(ar, 4), a(ar, 5),
+          bytesOf(strs, 0), bytesOf(strs, 1), bytesOf(strs, 2), bytesOf(strs, 3))
+      : JitNative.invoke(p, ctx, ar.length, a(ar, 0), a(ar, 1), a(ar, 2), a(ar, 3), a(ar, 4), a(ar, 5));
+    return new JitPtr(guard(r, "callStruct", n));
   }
 
   public function str(path:String):String {
