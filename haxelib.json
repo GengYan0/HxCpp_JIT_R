@@ -4,9 +4,9 @@
   "license": "MIT",
   "tags": ["cpp", "jit", "native", "windows", "msvc", "runtime", "hot-reload"],
   "description": "Compile and call native C++ from a hxcpp application at runtime.",
-  "version": "0.0.12",
+  "version": "0.0.13",
   "classPath": "src",
-  "releasenote": "beta: std::string results, pointer variables and address-of, per-call options, pointer read and write",
+  "releasenote": "beta: struct arrays and nested fields, expression evaluation, bound handles, multiple translation units, ELF manual mapping",
   "contributors": ["GengYan0"],
   "dependencies": {}
 }

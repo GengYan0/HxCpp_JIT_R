@@ -3,6 +3,7 @@ import hxcpp_jit_r.JitHost;
 import hxcpp_jit_r.JitNative;
 import hxcpp_jit_r.JitSession;
 import hxcpp_jit_r.JitCompiler;
+import hxcpp_jit_r.JitElf;
 
 class Main {
   static var pass = 0;
@@ -536,6 +537,117 @@ double sum_all() { double s = 0; for (int i = 0; i < 16; i++) s += samples[i]; r
     eq("stops after unwatch", Std.string(wm == null ? -1 : wm.callAuto("wv", [])), "2");
     Jit.watchEvery = 30;
     try sys.FileSystem.deleteFile(wpath) catch (e:Dynamic) {};
+
+    head("struct arrays and nested fields");
+    var sa = Jit.compile("structarr", "
+struct Vec2 { double x; double y; };
+struct Obj { Vec2 pos; Vec2 vel; int tag; };
+Vec2 pts[4] = {{1,2},{3,4},{5,6},{7,8}};
+Obj box = {{10,20},{1,2},7};
+double totalx() { double s = 0; for (int i = 0; i < 4; i++) s += pts[i].x; return s; }
+");
+    ok("struct array compiles", sa.ok, sa.diag.length > 0 ? JitCompiler.describe(sa.diag[0]) : "");
+    eq("struct array kind", sa.kindOf("pts"), "structarray");
+    eq("struct array len", Std.string(sa.arraySize("pts")), "4");
+    eq("struct array elem size", Std.string(sa.elemSize("pts")), "16");
+    eq("elem field read", Std.string(sa.get("pts[1].y")), "4");
+    eq("elem field second", Std.string(sa.get("pts[0].x")), "1");
+    ok("elem field write", sa.set("pts[2].x", 50), "");
+    eq("elem field write back", Std.string(sa.get("pts[2].x")), "50");
+    eq("native sees write", Std.string(sa.callAuto("totalx", [])), "61");
+    eq("elem out of range", Std.string(sa.get("pts[9].x")), "0");
+    ok("elem out of range write ignored", sa.set("pts[9].x", 123) && sa.get("pts[9].x") == 0, "");
+    eq("nested field read", Std.string(sa.get("box.pos.x")), "10");
+    eq("nested field deep", Std.string(sa.get("box.vel.y")), "2");
+    eq("nested plain field", Std.string(sa.get("box.tag")), "7");
+    ok("nested field write", sa.set("box.pos.y", 25), "");
+    eq("nested field write back", Std.string(sa.get("box.pos.y")), "25");
+    ok("leaf fields listed", sa.leafFieldsOf("box").indexOf("pos.x") >= 0, sa.leafFieldsOf("box").join(","));
+    ok("bad path rejected", sa.set("pts[1]", 3) == false, "");
+
+    var ssa = new JitSession("sessarr");
+    ok("session struct array compiles", ssa.eval("
+struct V2 { double x; double y; };
+V2 path[4];
+double peekx() { return path[1].x; }
+"), ssa.lastError);
+    ssa.set("path[1].x", 42);
+    ok("session rebuild keeps struct array", ssa.eval("double extra() { return 1; }\n"), ssa.lastError);
+    eq("session element restored", Std.string(ssa.get("path[1].x")), "42");
+    eq("session element seen natively", Std.string(ssa.module.callAuto("peekx", [])), "42");
+
+    head("expressions");
+    var ex = Jit.compile("exprm", "
+double ax = 3; double ay = 4;
+");
+    ok("expression module", ex.ok, "");
+    eq("expr path sum", Std.string(ex.get("ax + ay")), "7");
+    eq("expr scales", Std.string(ex.expr("(ax + ay) * 2")), "14");
+    eq("expr sqrt", Std.string(ex.expr("sqrt(ax*ax + ay*ay)")), "5");
+    eq("expr compare", Std.string(ex.expr("ax < ay")), "1");
+    eq("expr ternary", Std.string(ex.expr("ax > ay ? 10 : 20")), "20");
+    eq("expr functions", Std.string(ex.expr("max(ax, ay) + min(ax, ay)")), "7");
+    eq("expr clamp", Std.string(ex.expr("clamp(9, 0, 5)")), "5");
+    eq("expr unary", Std.string(ex.expr("-ax + 1")), "-2");
+    ok("expr unknown is nan", ex.expr("nope + 1") != ex.expr("nope + 1"), "");
+    ok("expr divide by zero is nan", ex.expr("ax / 0") != ex.expr("ax / 0"), "");
+    ok("expr trailing junk is nan", ex.expr("ax +") != ex.expr("ax +"), "");
+
+    head("bound handles");
+    var bh = Jit.compile("bound", "double add(double a, double b) { return a + b; }\ndouble twice(double v) { return v * 2; }\n");
+    var bf = bh.bind("add");
+    ok("bind resolves", bf.valid(), bf.name + " " + bf.sig);
+    eq("bound call", Std.string(bf.call(2, 3)), "5");
+    var bg = bh.bind("twice");
+    eq("bound single arg", Std.string(bg.call(21)), "42");
+    ok("bind missing is invalid", !bh.bind("nope").valid(), "");
+    ok("bind wrong sig is invalid", !bh.bind("add", "i(dd)").valid(), "");
+    var repsB = 200000;
+    var tB = Sys.time();
+    var accB:Float = 0;
+    for (i in 0...repsB) accB += bf.call(i, 1);
+    var bUs = (Sys.time() - tB) * 1000000.0 / repsB;
+    ok("bound call is fast", bUs < 0.5 && accB > 0, Jit.f3(bUs) + "us/call");
+
+    head("multiple translation units");
+    var mdir = Sys.getCwd() + "/multitu";
+    if (!sys.FileSystem.exists(mdir)) sys.FileSystem.createDirectory(mdir);
+    sys.io.File.saveContent(mdir + "/shared.h", "inline double sq(double v) { return v * v; }\n");
+    sys.io.File.saveContent(mdir + "/main.cpp", "#include \"shared.h\"\ndouble quad(double v) { return sq(v) * 2; }\n");
+    sys.io.File.saveContent(mdir + "/extra.cpp", "#include \"shared.h\"\ndouble twice(double v) { return v * 2; }\ndouble quadplus(double v) { return sq(v) * 2 + 1; }\n");
+    var mm = Jit.compileFiles("multi", mdir + "/main.cpp", [mdir + "/extra.cpp"], {includes: [mdir]});
+    ok("multi file compiles", mm.ok, mm.diag.length > 0 ? JitCompiler.describe(mm.diag[0]) : "");
+    eq("main unit with local include", Std.string(mm.callAuto("quad", [3])), "18");
+    eq("linked unit exported", Std.string(mm.callAuto("twice", [4])), "8");
+    eq("linked unit with include", Std.string(mm.callAuto("quadplus", [3])), "19");
+    ok("multi file lists both", mm.fnNames().indexOf("twice") >= 0 && mm.fnNames().indexOf("quad") >= 0, mm.fnNames().join(","));
+    var rm = Jit.reload("multi");
+    ok("multi file reload keeps units", rm != null && rm.ok && rm.callAuto("twice", [5]) == 10, rm == null ? "null" : "ok=" + rm.ok);
+
+    head("elf parser");
+    var eb = haxe.io.Bytes.alloc(120);
+    eb.set(0, 0x7F);
+    eb.set(1, 0x45);
+    eb.set(2, 0x4C);
+    eb.set(3, 0x46);
+    eb.set(4, 2);
+    eb.set(5, 1);
+    eb.setUInt16(16, 3);
+    eb.setUInt16(18, 0x3E);
+    eb.setInt32(32, 64);
+    eb.setUInt16(54, 56);
+    eb.setUInt16(56, 1);
+    eb.setInt32(64, 1);
+    eb.setInt32(64 + 4, 5);
+    eb.setInt32(64 + 32, 4096);
+    eb.setInt32(64 + 40, 8192);
+    var ei = JitElf.parse(eb);
+    ok("elf header parsed", ei.ok, ei.error);
+    eq("elf phnum", Std.string(ei.phnum), "1");
+    eq("elf machine", Std.string(ei.machine), "62");
+    eq("elf load memsz", Std.string(Std.int(ei.phdrs[0].memsz)), "8192");
+    ok("elf rejects short input", !JitElf.parse(haxe.io.Bytes.alloc(8)).ok, "");
+    ok("elf manual map reports platform", !JitElf.load(mdir + "/extra.cpp").ok, "");
 
     head("throughput");
     var pm = Jit.compile("perf", "RJIT(mix) { double s = 0; for (int i = 0; i < 8; i++) s += (double)i * RJIT_A0; return s; }\n");

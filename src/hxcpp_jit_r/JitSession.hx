@@ -65,9 +65,19 @@ class JitSession {
           if (v == v) out.set(n + "[" + i + "]", v);
         }
       } else if (k == "struct") {
-        for (f in module.fieldsOf(n)) {
-          var v = module.getField(n, f);
+        for (f in module.leafFieldsOf(n)) {
+          var v = module.get(n + "." + f);
           if (v == v) out.set(n + "." + f, v);
+        }
+      } else if (k == "structarray") {
+        var sz = module.arraySize(n);
+        var leaves = module.leafFieldsOf(n);
+        for (i in 0...sz) {
+          for (f in leaves) {
+            var key = n + "[" + i + "]." + f;
+            var v = module.get(key);
+            if (v == v) out.set(key, v);
+          }
         }
       }
     }

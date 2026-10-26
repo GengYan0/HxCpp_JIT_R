@@ -44,6 +44,14 @@ class JitImage {
   public var error:String = "";
   public var manual:Bool = false;
   public var handle:cpp.SizeT = 0;
+  public var alloc:cpp.SizeT = 0;
+  public var allocSize:Int = 0;
+  public var initVa:cpp.SizeT = 0;
+  public var finiVa:cpp.SizeT = 0;
+  public var initArr:cpp.SizeT = 0;
+  public var initArrSize:Int = 0;
+  public var finiArr:cpp.SizeT = 0;
+  public var finiArrSize:Int = 0;
 
   public function new() {}
 
@@ -64,8 +72,27 @@ class JitLoader {
     return JitNative.toSizeT(JitNative.toFloat(base) + off);
   }
 
-  static function ptrOf(b:haxe.io.Bytes):cpp.SizeT {
+  public static function ptrOf(b:haxe.io.Bytes):cpp.SizeT {
     return untyped __cpp__("(size_t){0}->b->Pointer()", b);
+  }
+
+  public static function track(img:JitImage):Void {
+    images.set(Std.string(img.base), img);
+  }
+
+  public static function releaseImage(img:JitImage):Void {
+    if (img == null) return;
+    teardownTls(img);
+    unregisterUnwind(img);
+    releaseLibs(img);
+    if (img.alloc != 0) {
+      JitNative.vfree(img.alloc, img.allocSize);
+      img.alloc = 0;
+    } else if (img.base != 0) {
+      JitNative.vfree(img.base, img.sizeOfImage);
+    }
+    img.base = 0;
+    img.ok = false;
   }
 
   static inline function u32(v:Int):Float {
@@ -173,6 +200,9 @@ class JitLoader {
   }
 
   public static function load(path:String):JitImage {
+    #if !windows
+    return JitElf.load(path);
+    #end
     var img = parse(path);
     if (!img.ok) return img;
     var bytes = File.getBytes(path);
@@ -468,13 +498,25 @@ class JitLoader {
       img.ok = false;
       return true;
     }
-    if (img.entry != 0) JitNative.callEntry(at(img.base, img.entry), img.base, 0, 0);
+    if (img.entry != 0) {
+      #if windows
+      JitNative.callEntry(at(img.base, img.entry), img.base, 0, 0);
+      #end
+    }
+    #if !windows
+    JitElf.runFiniArray(img);
+    #end
     teardownTls(img);
     unregisterUnwind(img);
     img.fwdCache = new Map();
     releaseLibs(img);
     images.remove(Std.string(img.base));
-    JitNative.vfree(img.base, img.sizeOfImage);
+    if (img.alloc != 0) {
+      JitNative.vfree(img.alloc, img.allocSize);
+      img.alloc = 0;
+    } else {
+      JitNative.vfree(img.base, img.sizeOfImage);
+    }
     img.base = 0;
     img.ok = false;
     return true;

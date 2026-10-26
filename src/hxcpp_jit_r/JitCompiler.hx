@@ -20,6 +20,13 @@ typedef JitResult = {
   var ms:Float;
 }
 
+typedef JitMulti = {
+  var files:Array<String>;
+  var texts:Array<String>;
+  var includes:Array<String>;
+  var missing:Array<String>;
+}
+
 class JitCompiler {
   static var DIAG_WIN = ~/^(.+?)\(([0-9]+)(,([0-9]+))?\) *: *(fatal error|error|warning) ?([A-Z]+[0-9]+)? *: *(.*)$/;
   static var DIAG_NIX = ~/^(.+?):([0-9]+)(:([0-9]+))?: *(fatal error|error|warning) ?([A-Z]+[0-9]+)? *: *(.*)$/;
@@ -114,17 +121,36 @@ class JitCompiler {
     try FileSystem.createDirectory(p) catch (e:Dynamic) {}
   }
 
-  public function build(key:String, src:String, lineShift:Int = 0, sigs:Array<String> = null):JitResult {
+  public function build(key:String, src:String, lineShift:Int = 0, sigs:Array<String> = null, multi:JitMulti = null):JitResult {
     var t0 = Sys.time();
     if (pchState != 1 && isMsvcLike()) prepare();
     var dir = cache.dirFor(key);
     var cpp = dir + "/mod" + (isMsvcLike() ? ".cpp" : ".cc");
-    var tail = JitCodegen.emit(JitScan.functions(src), JitScan.globals(src), sigs, JitScan.structs(src));
-    var pre = needsStringHeader(src) ? "#include <string>\n" : "";
+    var texts = [src];
+    if (multi != null) for (t in multi.texts) texts.push(t);
+    var fns = [];
+    var seen = new Map<String, Bool>();
+    var externs:Array<String> = [];
+    for (i in 0...texts.length) {
+      for (f in JitScan.functions(texts[i])) {
+        var k = f.name + "|" + f.sig;
+        if (seen.exists(k)) continue;
+        seen.set(k, true);
+        fns.push(f);
+        if (i > 0 && !f.isStatic) externs.push(declOf(f));
+      }
+    }
+    var structsAll = [];
+    for (t in texts) for (s in JitScan.structs(t)) structsAll.push(s);
+    var vars = JitScan.globals(src);
+    var tail = JitCodegen.emit(fns, vars, sigs, structsAll, externs);
+    var pre = needsStringHeader(texts.join("\n")) ? "#include <string>\n" : "";
     var shift = lineShift + (pre == "" ? 0 : 1);
     File.saveContent(cpp, pre + (tail == "" ? src : src + tail));
     var out = cache.nextBinary(key);
-    var args = isMsvcLike() ? msvcArgs(cpp, out, dir) : gccArgs(cpp, out, dir);
+    var more = multi == null ? null : multi.files;
+    var incs = multi == null ? null : multi.includes;
+    var args = isMsvcLike() ? msvcArgs(cpp, out, dir, more, incs) : gccArgs(cpp, out, dir, more, incs);
     lastCommand = tool.exe + " " + args.join(" ");
     if (Jit.debug) Jit.log("[jit] exec " + lastCommand);
     var r = run(args);
@@ -141,7 +167,13 @@ class JitCompiler {
     };
   }
 
-  function msvcArgs(cpp:String, out:String, dir:String):Array<String> {
+  public static function declOf(f:JitScan.JitFnInfo):String {
+    var ret = StringTools.trim(f.rawRet);
+    var args = f.rawArgs == null ? [] : f.rawArgs;
+    return ret + " " + f.name + "(" + (args.length == 0 ? "" : args.join(", ")) + ")";
+  }
+
+  function msvcArgs(cpp:String, out:String, dir:String, more:Array<String> = null, incs:Array<String> = null):Array<String> {
     var a = extra.copy();
     a.push("/nologo");
     a.push("/LD");
@@ -161,7 +193,9 @@ class JitCompiler {
     a.push("/FIrjit_abi.h");
     a.push("/I" + cache.root);
     a.push("/I" + dir);
+    if (incs != null) for (p in incs) if (p != null && p != "") a.push("/I" + p);
     a.push(cpp);
+    if (more != null) for (p in more) if (p != null && p != "") a.push(p);
     if (pchState == 1 && pchObj != "") a.push(pchObj);
     a.push("/Fe:" + out);
     a.push("/Fo:" + dir + "/");
@@ -171,8 +205,8 @@ class JitCompiler {
     return a;
   }
 
-  function gccArgs(cpp:String, out:String, dir:String):Array<String> {
-    return posixArgs(cpp, out, dir, cache.headerFile(), cache.root, std, opt, extra, tool.backend);
+  function gccArgs(cpp:String, out:String, dir:String, more:Array<String> = null, incs:Array<String> = null):Array<String> {
+    return posixArgs(cpp, out, dir, cache.headerFile(), cache.root, std, opt, extra, tool.backend, more, incs);
   }
 
   public static function needsStringHeader(src:String):Bool {
@@ -183,7 +217,7 @@ class JitCompiler {
     return t.indexOf("#include<iostream>") < 0 && t.indexOf("#include<sstream>") < 0;
   }
 
-  public static function posixArgs(cpp:String, out:String, dir:String, header:String, cacheRoot:String, std:String, opt:String, extra:Array<String>, backend:String):Array<String> {
+  public static function posixArgs(cpp:String, out:String, dir:String, header:String, cacheRoot:String, std:String, opt:String, extra:Array<String>, backend:String, more:Array<String> = null, incs:Array<String> = null):Array<String> {
     var a = extra == null ? [] : extra.copy();
     var o = "O2";
     if (opt == "Od") o = "O0";
@@ -201,7 +235,9 @@ class JitCompiler {
     a.push(header);
     a.push("-I" + cacheRoot);
     a.push("-I" + dir);
+    if (incs != null) for (p in incs) if (p != null && p != "") a.push("-I" + p);
     a.push(cpp);
+    if (more != null) for (p in more) if (p != null && p != "") a.push(p);
     a.push("-o");
     a.push(out);
     #if mac

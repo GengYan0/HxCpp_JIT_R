@@ -6,6 +6,9 @@ typedef JitFnInfo = {
   var args:Array<String>;
   var sig:String;
   var callable:Bool;
+  var rawRet:String;
+  var rawArgs:Array<String>;
+  var isStatic:Bool;
 }
 
 typedef JitVarInfo = {
@@ -22,6 +25,7 @@ typedef JitFieldInfo = {
   var name:String;
   var type:String;
   var raw:String;
+  var nested:String;
 }
 
 typedef JitStructInfo = {
@@ -109,7 +113,7 @@ class JitScan {
 
   public static function structs(src:String):Array<JitStructInfo> {
     var clean = strip(src);
-    var out:Array<JitStructInfo> = [];
+    var defs:Array<{name:String, body:String}> = [];
     var i = 0;
     var n = clean.length;
     while (i < n) {
@@ -136,9 +140,15 @@ class JitScan {
         e++;
       }
       if (depth != 0) break;
-      var body = clean.substring(b + 1, e - 1);
+      defs.push({name: nm, body: clean.substring(b + 1, e - 1)});
+      i = e;
+    }
+    var known = new Map<String, Bool>();
+    for (d in defs) known.set(d.name, true);
+    var out:Array<JitStructInfo> = [];
+    for (d in defs) {
       var fields:Array<JitFieldInfo> = [];
-      for (seg in body.split(";")) {
+      for (seg in d.body.split(";")) {
         var t = StringTools.trim(seg);
         if (t == "") continue;
         if (t.indexOf("(") >= 0) continue;
@@ -149,12 +159,16 @@ class JitScan {
         var fn = StringTools.trim(t.substr(sp + 1));
         if (!isIdent(fn)) continue;
         var c = code(ty);
+        var tq = StringTools.trim(ty);
+        if (c == "?" && known.exists(tq) && tq != d.name) {
+          fields.push({name: fn, type: "struct", raw: ty, nested: tq});
+          continue;
+        }
         if (c == "?" || c == "v") continue;
         if (c == "p" || c == "s" || c == "S") continue;
-        fields.push({name: fn, type: c, raw: ty});
+        fields.push({name: fn, type: c, raw: ty, nested: ""});
       }
-      if (fields.length > 0) out.push({name: nm, fields: fields});
-      i = e;
+      if (fields.length > 0) out.push({name: d.name, fields: fields});
     }
     return out;
   }
@@ -187,10 +201,11 @@ class JitScan {
       if (kw.indexOf(ret) >= 0) continue;
       if (ret.indexOf("(") >= 0) continue;
       var params = s.substr(p + 1, q - p - 1);
+      var rawArgs = splitArgs(params);
       var args:Array<String> = [];
       var ok = true;
       var strArgs = 0;
-      for (t in splitArgs(params)) {
+      for (t in rawArgs) {
         var c = code(t);
         if (c == "?") {
           ok = false;
@@ -207,7 +222,8 @@ class JitScan {
       if (rc == "?") ok = false;
       if (rc == "s" || rc == "S") ok = false;
       var sig = rc + "(" + args.join("") + ")";
-      out.push({name: name, ret: rc, args: args, sig: sig, callable: ok});
+      var local = ret.indexOf("static") >= 0 || ret.indexOf("inline") >= 0;
+      out.push({name: name, ret: rc, args: args, sig: sig, callable: ok, rawRet: ret, rawArgs: rawArgs, isStatic: local});
     }
     return out;
   }
@@ -227,51 +243,62 @@ class JitScan {
       var s = StringTools.trim(raw);
       if (s == "" || s.charAt(0) == "#") continue;
       if (s.indexOf("(") >= 0) continue;
-      if (s.indexOf("{") >= 0 || s.indexOf("}") >= 0) continue;
-      var semi = s.indexOf(";");
+      var semi = s.lastIndexOf(";");
       if (semi < 0) continue;
-      var decl = StringTools.trim(s.substr(0, semi));
-      var eq = decl.indexOf("=");
-      if (eq >= 0) decl = StringTools.trim(decl.substr(0, eq));
-      var isConst = decl.indexOf("const") >= 0;
-      decl = trimQualifiers(decl);
-      var sp = lastSpace(decl);
-      if (sp < 0) continue;
-      var type = StringTools.trim(decl.substr(0, sp));
-      var name = StringTools.trim(decl.substr(sp + 1));
-      var kind = "num";
-      var elem = "";
-      var size = 0;
-      var structName = "";
-      var lb = name.indexOf("[");
-      if (lb > 0) {
-        var rb = name.indexOf("]", lb);
-        if (rb < 0) continue;
-        var sz = Std.parseInt(StringTools.trim(name.substring(lb + 1, rb)));
-        name = StringTools.trim(name.substr(0, lb));
-        if (!isIdent(name)) continue;
-        var c = code(type);
-        if (c == "?" || c == "v" || c == "p" || c == "s" || c == "S") continue;
-        if (sz == null || sz <= 0) continue;
-        kind = "array";
-        elem = c;
-        size = sz;
-      } else {
-        if (!isIdent(name)) continue;
-        if (isNumeric(type, nums)) {
-          kind = "num";
-        } else if (isPointerType(type)) {
-          kind = "ptr";
+      for (seg in s.substr(0, semi).split(";")) {
+        var decl = StringTools.trim(seg);
+        if (decl == "") continue;
+        var eq = decl.indexOf("=");
+        if (eq >= 0) decl = StringTools.trim(decl.substr(0, eq));
+        if (decl.indexOf("{") >= 0 || decl.indexOf("}") >= 0) continue;
+        var isConst = decl.indexOf("const") >= 0;
+        decl = trimQualifiers(decl);
+        var sp = lastSpace(decl);
+        if (sp < 0) continue;
+        var type = StringTools.trim(decl.substr(0, sp));
+        var name = StringTools.trim(decl.substr(sp + 1));
+        var kind = "num";
+        var elem = "";
+        var size = 0;
+        var structName = "";
+        var lb = name.indexOf("[");
+        if (lb > 0) {
+          var rb = name.indexOf("]", lb);
+          if (rb < 0) continue;
+          var sz = Std.parseInt(StringTools.trim(name.substring(lb + 1, rb)));
+          name = StringTools.trim(name.substr(0, lb));
+          if (!isIdent(name)) continue;
+          if (sz == null || sz <= 0) continue;
+          var c = code(type);
+          if (c == "?") {
+            var st = sts.get(StringTools.trim(type));
+            if (st == null) continue;
+            kind = "structarray";
+            structName = st.name;
+            size = sz;
+          } else {
+            if (c == "v" || c == "p" || c == "s" || c == "S") continue;
+            kind = "array";
+            elem = c;
+            size = sz;
+          }
         } else {
-          var st = sts.get(StringTools.trim(type));
-          if (st == null) continue;
-          kind = "struct";
-          structName = st.name;
+          if (!isIdent(name)) continue;
+          if (isNumeric(type, nums)) {
+            kind = "num";
+          } else if (isPointerType(type)) {
+            kind = "ptr";
+          } else {
+            var st = sts.get(StringTools.trim(type));
+            if (st == null) continue;
+            kind = "struct";
+            structName = st.name;
+          }
         }
+        if (seen.exists(name)) continue;
+        seen.set(name, true);
+        out.push({name: name, type: type, isConst: isConst, kind: kind, elem: elem, size: size, structName: structName});
       }
-      if (seen.exists(name)) continue;
-      seen.set(name, true);
-      out.push({name: name, type: type, isConst: isConst, kind: kind, elem: elem, size: size, structName: structName});
     }
     return out;
   }

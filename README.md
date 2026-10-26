@@ -1,6 +1,6 @@
 # HxCpp_JIT_R
 
-Beta 0.0.12
+Beta 0.0.13
 
 Compile and call native C++ while your application is running. Hand it a source string, get a module back, call its functions like any Haxe method.
 
@@ -17,12 +17,16 @@ Behind the call the source goes into a cache directory, is compiled into a share
 - `std::string` results read back with `callStr`
 - Pointer variables: read, write, repoint, and `&name` for the address
 - Zero-compile reads and writes for globals, struct fields and array elements
+- Struct arrays and nested fields: `pts[2].x`, `box.pos.x`, any depth up to three
+- Expression evaluation against live module state: `m.expr("p.x + p.y")`
+- Bound handles: `m.bind(name)` resolves the symbol and signature once, then calls at 0.015 us
+- Multiple translation units per module with local `#include` search paths
 - Bulk array transfer for large buffers (`readDoubles`, `writeDoubles`, `readRaw`, `writeRaw`)
 - `JitSession` keeps numeric, struct and array state across recompiles
 - Hot reload with a three-frame deferred unload, plus `Jit.watch` file polling
 - SEH guard around every call; `callFast` skips it for trusted code
 - Content-addressed build cache with `exportPack` / `importPack` for machines without a compiler
-- Manual image mapping as an alternative to `LoadLibrary`
+- Manual image mapping as an alternative to `LoadLibrary`, with the same control on Linux over ELF
 - Asynchronous compilation with a concurrency gate
 - Diagnostics mapped back to the original source line
 
@@ -150,6 +154,7 @@ The standard library, inline assembly, SIMD intrinsics and templates all work. T
 | `Jit.compile(name, src, ?options):JitModule` | Compile synchronously, skip if cached |
 | `Jit.compileAsync(name, src, cb, ?options)` | Queue a background build |
 | `Jit.compileFile(path, ?name, ?options)` | Compile from a file |
+| `Jit.compileFiles(name, mainPath, otherPaths, ?options)` | Compile several translation units into one module |
 | `Jit.reload(name, ?newSrc)` | Force a rebuild |
 | `Jit.watch(path, ?name, ?onReload):Bool` | Poll the file and reload on change |
 | `Jit.unwatch(path):Bool` / `Jit.watchedFiles()` | Manage watched files |
@@ -175,13 +180,16 @@ The standard library, inline assembly, SIMD intrinsics and templates all work. T
 | `callAuto(name, args, ?strs)` | Convert by scanned signature |
 | `callSig(name, sig, args, ?strs)` | Explicit signature, for overloads |
 | `callStr(name, args, ?strs):String` | Read an `RJIT_RETSTR` or `std::string` result |
-| `get(path)` / `set(path, v)` | `"n"`, `"&n"`, `"p.x"`, `"arr[2]"` |
+| `bind(name, ?sig):JitFn` | Resolve the symbol once, then call through the handle |
+| `expr(code):Float` | Evaluate an expression against live module state |
+| `get(path)` / `set(path, v)` | `"n"`, `"&n"`, `"p.x"`, `"arr[2]"`, `"pts[2].x"`, `"box.pos.x"` |
 | `addrOf(name)` | Address of a variable |
 | `getVar` / `setVar` | Top-level numeric and pointer variables |
 | `getField` / `setField` / `getIndex` / `setIndex` | Explicit access |
+| `getFieldPath` / `setFieldPath` / `getElemField` / `setElemField` | Nested paths and struct array elements |
 | `readDoubles` / `writeDoubles` / `readInts` / `writeInts` | Bulk array transfer |
 | `readRaw` / `writeRaw` / `arrayAddress` / `elemSize` | Raw buffer access |
-| `kindOf(name)` / `fieldsOf(name)` / `arraySize(name)` | Variable info |
+| `kindOf(name)` / `fieldsOf(name)` / `leafFieldsOf(name)` / `arraySize(name)` | Variable info |
 | `signature(name)` / `signatures(name)` / `hasSig(sig)` | Signature info |
 | `address(name)` / `ptr(name)` | Function address / `JitPtr` |
 | `has(name)` / `report()` / `dispose()` | Misc |
@@ -197,6 +205,17 @@ The standard library, inline assembly, SIMD intrinsics and templates all work. T
 | `readI32(at)` / `readU16(at)` / `readU8(at)` | Read integers |
 | `writeF64(v, at)` / `writeF32(v, at)` / `writeI32(v, at)` | Write |
 | `readBytes(len, at)` / `writeBytes(bytes, at)` | Raw buffer transfer |
+
+### JitFn
+
+| Member | Meaning |
+|---|---|
+| `name` / `sig` / `returnsString` | What was bound |
+| `valid()` | Both the address and the dispatcher resolved |
+| `call(a0..a5):Float` | Fixed argument call |
+| `callA(args, ?strs):Float` | Variable argument call |
+| `callStr(args, ?strs):String` | String result |
+| `address():Float` | Raw function address |
 
 ### JitSession
 
@@ -279,6 +298,93 @@ m.get("missing.x");       // NaN
 ```
 
 `kindOf("camera")` returns `"struct"`, `fieldsOf("camera")` returns `["x","y"]`, `kindOf("samples")` returns `"array"`, `arraySize("samples")` returns `8`.
+
+### Struct arrays and nested fields
+
+```haxe
+var m = Jit.compile("entities", '
+struct Vec2 { double x; double y; };
+struct Body { Vec2 pos; Vec2 vel; int hp; };
+Vec2 trail[64];
+Body actors[8];
+');
+
+m.get("trail[3].y");        // any index, bounds checked in native code
+m.set("trail[3].y", 12.5);
+m.get("actors[2].pos.x");   // nested struct inside an array
+m.set("actors[2].hp", 100);
+m.get("actors[99].hp");     // 0, out of range
+
+m.leafFieldsOf("actors");   // ["pos.x","pos.y","vel.x","vel.y","hp"]
+m.elemSize("trail");        // 16, sizeof(Vec2)
+```
+
+Field paths resolve through any struct nesting up to three levels. Every accessor is generated for the leaf fields only, so the index and the bounds check stay in native code and nothing is interpreted per call.
+
+### Expressions
+
+```haxe
+var m = Jit.compile("physics", '
+double ax = 3; double ay = 4;
+double speed = 12;
+');
+
+m.expr("ax + ay");                 // 7
+m.expr("sqrt(ax*ax + ay*ay)");     // 5
+m.expr("(ax + ay) * 2");           // 14
+m.expr("max(ax, ay) + min(ax, ay)"); // 7
+m.expr("speed > 10 ? 1 : 0");      // 1
+m.get("ax + ay");                  // 7, paths and expressions share one entry point
+```
+
+Operators: `+ - * / % ^`, comparisons, `&& || !`, ternary. Functions: `abs sqrt floor ceil round trunc sign min max pow sin cos tan asin acos atan atan2 exp log log2 log10 hypot mod clamp lerp deg rad`. Constants: `pi`, `e`. Unknown names evaluate to `NaN` instead of throwing.
+
+Evaluation reads the live module state through the generated accessors, so no compilation happens per expression.
+
+### Bound handles
+
+```haxe
+var m = Jit.compile("maths", '
+double add(double a, double b) { return a + b; }
+double scale(double v, double k) { return v * k; }
+');
+
+var add = m.bind("add");
+add.valid();          // true
+add.call(2, 3);       // 5
+add.sig;              // "d(dd)"
+
+var k = m.bind("scale", "d(dd)");   // explicit signature for overloads
+k.callA([4, 2.5]);                  // 10
+
+m.bind("nope").valid();             // false
+```
+
+Binding resolves the address stub and the dispatcher once; later calls skip both map lookups. Measured on the console suite: `0.015 us` per call against `0.03 us` for `callAuto`.
+
+### Multiple translation units
+
+```haxe
+// shared.h
+inline double sq(double v) { return v * v; }
+
+// main.cpp
+#include "shared.h"
+double quad(double v) { return sq(v) * 2; }
+
+// extra.cpp
+#include "shared.h"
+double twice(double v) { return v * 2; }
+
+// Haxe
+var m = Jit.compileFiles("mixed", "cpp/main.cpp", ["cpp/extra.cpp"], {includes: ["cpp"]});
+m.callAuto("quad", [3]);     // 18
+m.callAuto("twice", [4]);    // 8, declared automatically
+```
+
+The main file keeps its globals and state; the other files are compiled and linked into the same image. Their functions are declared in the generated wrapper, so they stay callable without writing anything by hand. A file listed but missing makes the module fail with `E_NOFILE` instead of silently dropping it.
+
+Functions in secondary files must have external linkage; `static` and `inline` definitions stay local to their unit.
 
 ### Bulk transfer
 
@@ -411,6 +517,8 @@ m.image.imports;       // resolved dependencies
 
 A manually mapped module is not in the system module list; `GetModuleHandle` cannot find it and `FreeLibrary` does not free it. Unload through `Jit.dispose`. For threads that touch TLS variables inside the library, call `JitLoader.bindThread()` on that thread.
 
+The same option on Linux maps the ELF image instead of calling `dlopen`: program headers are copied, relocations are applied from the dynamic section, and `DT_INIT`, `DT_INIT_ARRAY`, `DT_FINI` and `DT_FINI_ARRAY` run in order. ELF thread-local storage is left to the system loader, so keep `loader: "loadlib"` for libraries that declare TLS.
+
 ### Distributing a build cache
 
 ```haxe
@@ -511,6 +619,7 @@ Jit.setup({
 | Rebuild | ~300ms, weakly dependent on function count |
 | Cache hit load | 2-3ms |
 | Single boundary call | 0.026-0.14us |
+| Bound handle call | 0.015us |
 | Manual mapping, 110KB image | under 5ms |
 
 Time goes into compiler process startup and linking, not into the amount of code.
@@ -528,15 +637,17 @@ Time goes into compiler process startup and linking, not into the amount of code
 - Compilation needs a local compiler; target machines fall back to the cache
 - SEH catches hardware exceptions only; C++ exceptions across the boundary are undefined
 - Build timeout terminates the compiler process
-- Struct accessors cover first-level numeric fields; nested structs and pointer members need a helper function
-- Manual mapping implements the Windows PE (Portable Executable) format only; ELF uses the system loader
+- Struct accessors cover numeric leaf fields up to three levels of nesting; pointer and string members need a helper function
+- Manual mapping handles PE on Windows and ELF64 on Linux; other formats use the system loader
+- A module has one main translation unit; secondary units cannot contribute globals to `get` and `set`
+- ELF manual mapping does not process thread-local storage; the system loader does
 - Changing the ABI header layout requires clearing the host precompiled header and rebuilding
 
 ---
 
 ## Testing
 
-`test/` is a standalone console project with 216 assertions.
+`test/` is a standalone console project with 268 assertions.
 
 ```
 cd test
@@ -544,7 +655,7 @@ haxe build.hxml
 bin/Main.exe
 ```
 
-Covers: core calls, diagnostic line numbers, expression offset, automatic signatures, string arguments, string and `RJIT_RETSTR` results, struct and array access, pointer variables and address-of, bulk transfer, session state, crash isolation and error callback, pointer handle, overload dispatch, concurrency gate, hot reload, file watch, large source, cache hit, cache packaging and import, compiler-less mode, manual mapping and unload, call throughput.
+Covers: core calls, diagnostic line numbers, expression offset, automatic signatures, string arguments, string and `RJIT_RETSTR` results, struct and array access, struct arrays and nested fields, expressions, bound handles, multiple translation units, pointer variables and address-of, bulk transfer, session state including struct arrays, crash isolation and error callback, pointer handle, overload dispatch, concurrency gate, hot reload, file watch, large source, cache hit, cache packaging and import, compiler-less mode, manual mapping and unload, ELF header parsing, call throughput.
 
 Linux:
 
@@ -566,8 +677,11 @@ src/hxcpp_jit_r/
   JitScan.hx        Source scanning: signatures, globals, structs, arrays
   JitCodegen.hx     Generates entry points, dispatchers, accessors
   JitLoader.hx      Image parsing and manual mapping
+  JitElf.hx         ELF parsing and manual mapping
   JitPack.hx        Cache packaging and validation
   JitPtr.hx         Pointer handle
+  JitFn.hx          Bound function handle
+  JitExpr.hx        Expression evaluator over live module state
   JitCompiler.hx    Compiler invocation, precompiled header, diagnostics
   JitToolchain.hx   Toolchain detection and environment injection
   JitCache.hx       Hashing, directories, cleanup

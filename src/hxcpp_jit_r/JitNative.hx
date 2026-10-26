@@ -514,6 +514,21 @@ class JitNative {
   @:functionCode('memcpy((void*)(size_t)dst, (const void*)(size_t)src, (size_t)len);')
   public static function memcpyRaw(dst:cpp.SizeT, src:cpp.SizeT, len:Int):Void {}
 
+  @:functionCode('if (p != 0 && len > 0) memset((void*)(size_t)p, 0, (size_t)len);')
+  public static function memzero(p:cpp.SizeT, len:Int):Void {}
+
+  @:functionCode('((void(*)(int,void*,void*))(size_t)f)(0, 0, 0); return 0.0;')
+  public static function callInit(f:cpp.SizeT):Float return 0;
+
+  @:functionCode('
+#ifdef _WIN32
+    return 0;
+#else
+    return (size_t)dlsym((void*)0, name.utf8_str());
+#endif
+  ')
+  public static function getProcGlobal(name:String):cpp.SizeT return 0;
+
   @:functionCode('
 #ifdef _WIN32
     FlushInstructionCache(GetCurrentProcess(), (const void*)(size_t)p, (SIZE_T)size);

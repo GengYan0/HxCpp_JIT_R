@@ -6,6 +6,12 @@ import hxcpp_jit_r.JitScan.JitFnInfo;
 import hxcpp_jit_r.JitScan.JitVarInfo;
 import hxcpp_jit_r.JitScan.JitStructInfo;
 
+typedef JitSeg = {
+  var field:Bool;
+  var name:String;
+  var index:Int;
+}
+
 class JitModule {
   public var name:String;
   public var id:Int;
@@ -20,6 +26,9 @@ class JitModule {
   public var cached:Bool = false;
   public var calls:Int = 0;
   public var image:JitImage = null;
+  public var extraSources:Array<String> = null;
+  public var sourcePaths:Array<String> = null;
+  public var mainPath:String = "";
 
   var handle:cpp.SizeT = 0;
   var ctx:cpp.SizeT = 0;
@@ -51,20 +60,29 @@ class JitModule {
     scan();
   }
 
+  public function allSources():Array<String> {
+    var out = [src];
+    if (extraSources != null) for (t in extraSources) if (t != null) out.push(t);
+    return out;
+  }
+
   public function scan():Void {
     fns = new Map();
     vars = new Map();
     sigsOf = new Map();
     structs = new Map();
-    for (s in JitScan.structs(src)) structs.set(s.name, s);
-    for (f in JitScan.functions(src)) {
-      if (!fns.exists(f.name)) fns.set(f.name, f);
-      var a = sigsOf.get(f.name);
-      if (a == null) {
-        a = [];
-        sigsOf.set(f.name, a);
+    var texts = allSources();
+    for (t in texts) for (s in JitScan.structs(t)) structs.set(s.name, s);
+    for (t in texts) {
+      for (f in JitScan.functions(t)) {
+        if (!fns.exists(f.name)) fns.set(f.name, f);
+        var a = sigsOf.get(f.name);
+        if (a == null) {
+          a = [];
+          sigsOf.set(f.name, a);
+        }
+        if (a.indexOf(f.sig) < 0) a.push(f.sig);
       }
-      if (a.indexOf(f.sig) < 0) a.push(f.sig);
     }
     for (v in JitScan.globals(src)) vars.set(v.name, v);
   }
@@ -84,6 +102,10 @@ class JitModule {
       return 0.0;
     }
     return r;
+  }
+
+  public function guardAt(r:Float, method:String, n:String):Float {
+    return guard(r, method, n);
   }
 
   public function varNames():Array<String> {
@@ -110,10 +132,16 @@ class JitModule {
 
   public function fieldsOf(n:String):Array<String> {
     var v = vars.get(n);
-    if (v == null || v.kind != "struct") return [];
+    if (v == null || (v.kind != "struct" && v.kind != "structarray")) return [];
     var st = structs.get(v.structName);
     if (st == null) return [];
     return [for (f in st.fields) f.name];
+  }
+
+  public function leafFieldsOf(n:String):Array<String> {
+    var v = vars.get(n);
+    if (v == null || (v.kind != "struct" && v.kind != "structarray")) return [];
+    return JitCodegen.leafPaths(structs, v.structName);
   }
 
   public function signature(n:String):String {
@@ -144,17 +172,40 @@ class JitModule {
   }
 
   public function getField(v:String, f:String):Float {
-    if (handle == 0) return Math.NaN;
-    var p = resolve("rjit_getf_" + JitCodegen.fieldName(v, f));
+    return getFieldPath(v, [f]);
+  }
+
+  public function setField(v:String, f:String, val:Float):Bool {
+    return setFieldPath(v, [f], val);
+  }
+
+  public function getFieldPath(v:String, path:Array<String>):Float {
+    if (handle == 0 || path == null || path.length == 0) return Math.NaN;
+    var p = resolve("rjit_getf_" + v + "__" + path.join("__"));
     if (p == 0) return Math.NaN;
     return JitNative.invoke(p, ctx, 0, 0, 0, 0, 0, 0, 0);
   }
 
-  public function setField(v:String, f:String, val:Float):Bool {
-    if (handle == 0) return false;
-    var p = resolve("rjit_setf_" + JitCodegen.fieldName(v, f));
+  public function setFieldPath(v:String, path:Array<String>, val:Float):Bool {
+    if (handle == 0 || path == null || path.length == 0) return false;
+    var p = resolve("rjit_setf_" + v + "__" + path.join("__"));
     if (p == 0) return false;
     JitNative.invoke(p, ctx, 1, val, 0, 0, 0, 0, 0);
+    return true;
+  }
+
+  public function getElemField(v:String, i:Int, path:Array<String>):Float {
+    if (handle == 0 || path == null || path.length == 0) return Math.NaN;
+    var p = resolve("rjit_getfa_" + v + "__" + path.join("__"));
+    if (p == 0) return Math.NaN;
+    return JitNative.invoke(p, ctx, 1, i, 0, 0, 0, 0, 0);
+  }
+
+  public function setElemField(v:String, i:Int, path:Array<String>, val:Float):Bool {
+    if (handle == 0 || path == null || path.length == 0) return false;
+    var p = resolve("rjit_setfa_" + v + "__" + path.join("__"));
+    if (p == 0) return false;
+    JitNative.invoke(p, ctx, 2, i, val, 0, 0, 0, 0);
     return true;
   }
 
@@ -184,7 +235,16 @@ class JitModule {
   public function elemSize(n:String):Int {
     var v = vars.get(n);
     if (v == null) return 0;
-    return switch (v.elem) {
+    if (v.kind == "structarray") {
+      var p = resolve("rjit_szof_" + n);
+      if (p == 0) return 0;
+      return Std.int(JitNative.invoke(p, ctx, 0, 0, 0, 0, 0, 0, 0));
+    }
+    return elemSizeOf(v.elem);
+  }
+
+  public static function elemSizeOf(c:String):Int {
+    return switch (c) {
       case "c": 1;
       case "h": 2;
       case "l": 8;
@@ -274,26 +334,18 @@ class JitModule {
   }
 
   public function get(path:String):Float {
-    if (path.charAt(0) == "&") return addrOf(StringTools.trim(path.substr(1)));
-    var v = path;
-    var dot = path.indexOf(".");
-    var lb = path.indexOf("[");
-    if (dot > 0) {
-      var f = path.substr(dot + 1);
-      if (f.indexOf(".") >= 0 || f.indexOf("[") >= 0) return Math.NaN;
-      return getField(path.substr(0, dot), f);
+    var s = StringTools.trim(path);
+    if (s == "") return Math.NaN;
+    if (s.charAt(0) == "&") {
+      var t = StringTools.trim(s.substr(1));
+      var q = parsePath(t);
+      if (q != null && q.segs.length == 0) return addrOf(q.base);
+      return Math.NaN;
     }
-    if (lb > 0) {
-      var rb = path.indexOf("]", lb);
-      if (rb < 0) return Math.NaN;
-      var i = Std.parseInt(StringTools.trim(path.substring(lb + 1, rb)));
-      if (i == null) return Math.NaN;
-      return getIndex(path.substr(0, lb), i);
-    }
-    var info = vars.get(v);
-    if (info == null) return Math.NaN;
-    if (info.kind != "num" && info.kind != "ptr") return Math.NaN;
-    return getVar(v);
+    var r = readPath(s);
+    if (r != null) return r;
+    if (JitExpr.looks(s)) return expr(s);
+    return Math.NaN;
   }
 
   public function addrOf(n:String):Float {
@@ -303,22 +355,122 @@ class JitModule {
     return JitNative.invoke(p, ctx, 0, 0, 0, 0, 0, 0, 0);
   }
 
+  public function expr(e:String):Float {
+    return JitExpr.eval(e, function(n) {
+      var r = readPath(n);
+      return r == null ? Math.NaN : r;
+    });
+  }
+
   public function set(path:String, val:Float):Bool {
-    var dot = path.indexOf(".");
-    var lb = path.indexOf("[");
-    if (dot > 0) {
-      var f = path.substr(dot + 1);
-      if (f.indexOf(".") >= 0 || f.indexOf("[") >= 0) return false;
-      return setField(path.substr(0, dot), f, val);
+    var s = StringTools.trim(path);
+    if (s == "") return false;
+    var p = parsePath(s);
+    if (p == null) return false;
+    return writePath(p, val);
+  }
+
+  public static function parsePath(p:String):Null<{base:String, segs:Array<JitSeg>}> {
+    var s = StringTools.trim(p);
+    var n = s.length;
+    if (n == 0) return null;
+    var i = 0;
+    while (i < n && isNameChar(s.charCodeAt(i))) i++;
+    if (i == 0) return null;
+    var base = s.substring(0, i);
+    var segs:Array<JitSeg> = [];
+    while (i < n) {
+      var c = s.charAt(i);
+      if (c == ".") {
+        i++;
+        var s0 = i;
+        while (i < n && isNameChar(s.charCodeAt(i))) i++;
+        if (i == s0) return null;
+        segs.push({field: true, name: s.substring(s0, i), index: 0});
+      } else if (c == "[") {
+        var rb = s.indexOf("]", i);
+        if (rb < 0) return null;
+        var num = Std.parseInt(StringTools.trim(s.substring(i + 1, rb)));
+        if (num == null) return null;
+        segs.push({field: false, name: "", index: num});
+        i = rb + 1;
+      } else {
+        return null;
+      }
     }
-    if (lb > 0) {
-      var rb = path.indexOf("]", lb);
-      if (rb < 0) return false;
-      var i = Std.parseInt(StringTools.trim(path.substring(lb + 1, rb)));
-      if (i == null) return false;
-      return setIndex(path.substr(0, lb), i, val);
+    return {base: base, segs: segs};
+  }
+
+  static inline function isNameChar(c:Int):Bool {
+    return (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 95;
+  }
+
+  function readPath(s:String):Null<Float> {
+    var p = parsePath(s);
+    if (p == null) return null;
+    var info = vars.get(p.base);
+    if (info == null) return null;
+    var segs = p.segs;
+    if (segs.length == 0) {
+      if (info.kind != "num" && info.kind != "ptr") return null;
+      return getVar(p.base);
     }
-    return setVar(path, val);
+    if (segs[0].field) {
+      var fields = [];
+      for (q in segs) {
+        if (!q.field) return null;
+        fields.push(q.name);
+      }
+      if (info.kind != "struct") return null;
+      return getFieldPath(p.base, fields);
+    }
+    if (info.kind == "array") {
+      if (segs.length != 1) return null;
+      return getIndex(p.base, segs[0].index);
+    }
+    if (info.kind == "structarray") {
+      var fields = [];
+      for (i in 1...segs.length) {
+        if (!segs[i].field) return null;
+        fields.push(segs[i].name);
+      }
+      if (fields.length == 0) return null;
+      return getElemField(p.base, segs[0].index, fields);
+    }
+    return null;
+  }
+
+  function writePath(p:{base:String, segs:Array<JitSeg>}, val:Float):Bool {
+    var info = vars.get(p.base);
+    if (info == null || info.isConst) return false;
+    var segs = p.segs;
+    if (segs.length == 0) {
+      if (info.kind != "num" && info.kind != "ptr") return false;
+      return setVar(p.base, val);
+    }
+    if (segs[0].field) {
+      var fields = [];
+      for (q in segs) {
+        if (!q.field) return false;
+        fields.push(q.name);
+      }
+      if (info.kind != "struct") return false;
+      return setFieldPath(p.base, fields, val);
+    }
+    if (info.kind == "array") {
+      if (segs.length != 1) return false;
+      return setIndex(p.base, segs[0].index, val);
+    }
+    if (info.kind == "structarray") {
+      var fields = [];
+      for (i in 1...segs.length) {
+        if (!segs[i].field) return false;
+        fields.push(segs[i].name);
+      }
+      if (fields.length == 0) return false;
+      return setElemField(p.base, segs[0].index, fields, val);
+    }
+    return false;
   }
 
   static function bytesOf(strs:Array<String>, i:Int):haxe.io.Bytes {
@@ -443,6 +595,28 @@ class JitModule {
     }
     callA(n, args == null ? [] : args);
     return JitHost.takeRet(id);
+  }
+
+  public function bind(n:String, ?sig:String):JitFn {
+    var f = fns.get(n);
+    var s = sig != null ? sig : (f == null ? null : f.sig);
+    if (s == null || handle == 0) return new JitFn(this, n, "", 0, 0, 0, false, false);
+    var fp = resolve("rjit_ptr_" + JitCodegen.ptrName(n, s));
+    var d = resolve(JitCodegen.dispName(s));
+    var needsStr = s.indexOf("s") >= 0 || s.indexOf("S") >= 0;
+    return new JitFn(this, n, s, fp, d, ctx, needsStr, f != null && f.ret == "S");
+  }
+
+  public function countCall():Void {
+    calls++;
+  }
+
+  public function ctxAddress():cpp.SizeT {
+    return ctx;
+  }
+
+  public function hostId():Int {
+    return id;
   }
 
   public function dispose():Void {

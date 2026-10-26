@@ -2,6 +2,7 @@ package hxcpp_jit_r;
 
 import hxcpp_jit_r.JitCompiler.JitDiag;
 import hxcpp_jit_r.JitCompiler.JitResult;
+import hxcpp_jit_r.JitCompiler.JitMulti;
 import hxcpp_jit_r.JitLoader.JitImage;
 import sys.FileSystem;
 import sys.io.File;
@@ -16,7 +17,9 @@ typedef JitOptions = {
   ?backend:String,
   ?lineShift:Int,
   ?sigs:Array<String>,
-  ?loader:String
+  ?loader:String,
+  ?sources:Array<String>,
+  ?includes:Array<String>
 }
 
 private typedef JitJob = {
@@ -26,6 +29,7 @@ private typedef JitJob = {
   shift:Int,
   sigs:Array<String>,
   loader:String,
+  multi:JitMulti,
   cb:Null<JitModule>->Void,
   done:Bool,
   result:Null<JitResult>
@@ -147,13 +151,56 @@ class Jit {
     return m;
   }
 
+  static function multiOf(o:Null<JitOptions>):Null<JitMulti> {
+    if (o == null || o.sources == null) return null;
+    var files:Array<String> = [];
+    var texts:Array<String> = [];
+    var missing:Array<String> = [];
+    var incs:Array<String> = o.includes == null ? [] : o.includes.copy();
+    var dirs = new Map<String, Bool>();
+    for (p in o.sources) {
+      if (p == null || p == "") continue;
+      if (!FileSystem.exists(p)) {
+        missing.push(p);
+        continue;
+      }
+      files.push(p);
+      texts.push(File.getContent(p));
+      var d = haxe.io.Path.directory(JitCache.normalize(p));
+      if (d != "" && !dirs.exists(d)) {
+        dirs.set(d, true);
+        incs.push(d);
+      }
+    }
+    if (files.length == 0 && missing.length == 0) return null;
+    return {files: files, texts: texts, includes: incs, missing: missing};
+  }
+
+  static function keySrc(src:String, multi:Null<JitMulti>):String {
+    if (multi == null) return src;
+    var b = new StringBuf();
+    b.add(src);
+    for (t in multi.texts) {
+      b.add("\n--tu--\n");
+      b.add(t);
+    }
+    return b.toString();
+  }
+
   static function compileNow(name:String, src:String, ?o:JitOptions):JitModule {
     if (debug) log("[jit] compile enter " + name);
     ensure();
     if (debug) log("[jit] ensured " + ready);
+    var multi = multiOf(o);
     var m = new JitModule(name, nextId++, "", src);
+    m.extraSources = multi == null ? null : multi.texts;
+    if (multi != null && multi.missing.length > 0) {
+      for (p in multi.missing) m.diag.push(diag("E_NOFILE", p));
+      m.ok = false;
+      return m;
+    }
     applyFlags(o);
-    var key = JitCache.key(src, flagStr(o));
+    var key = JitCache.key(keySrc(src, multi), flagStr(o));
     m.key = key;
     if (!ready) {
       var hit = cache == null ? null : cache.dllFor(key);
@@ -164,7 +211,7 @@ class Jit {
       m.cached = true;
       totalCacheHits++;
       if (!load(m, hit)) return m;
-      m.symbols = scan(src);
+      m.symbols = scanAll(m.allSources());
       m.ok = true;
       var prev = mods.get(name);
       if (prev != null && prev != m) prev.dispose();
@@ -183,7 +230,7 @@ class Jit {
       if (!load(m, existing)) return m;
     } else {
       var t0 = Sys.time();
-      var r = compiler.build(key, src, o == null ? 0 : (o.lineShift ?? 0), o == null ? null : o.sigs);
+      var r = compiler.build(key, src, o == null ? 0 : (o.lineShift ?? 0), o == null ? null : o.sigs, multi);
       totalBuilds++;
       m.ms = r.ms;
       m.diag = r.diag;
@@ -191,7 +238,7 @@ class Jit {
       if (!r.ok) return m;
       if (!load(m, r.dll)) return m;
     }
-    m.symbols = scan(src);
+    m.symbols = scanAll(m.allSources());
     m.ok = true;
     var prev = mods.get(name);
     if (prev != null && prev != m) prev.dispose();
@@ -211,7 +258,9 @@ class Jit {
       return m;
     }
     var n = name == null ? haxe.io.Path.withoutExtension(haxe.io.Path.withoutDirectory(path)) : name;
-    return compile(n, File.getContent(path), o);
+    var m = compile(n, File.getContent(path), o);
+    m.mainPath = path;
+    return m;
   }
 
   public static function compileAsync(name:String, src:String, cb:Null<JitModule>->Void, ?o:JitOptions):Void {
@@ -221,7 +270,8 @@ class Jit {
       return;
     }
     applyFlags(o);
-    var key = JitCache.key(src, flagStr(o));
+    var multi = multiOf(o);
+    var key = JitCache.key(keySrc(src, multi), flagStr(o));
     if ((o == null || o.force != true) && cache.dllFor(key) != null) {
       cb(compile(name, src, o));
       return;
@@ -233,6 +283,7 @@ class Jit {
       shift: o == null ? 0 : (o.lineShift ?? 0),
       sigs: o == null ? null : o.sigs,
       loader: o == null || o.loader == null ? loader : o.loader,
+      multi: multi,
       cb: cb,
       done: false,
       result: null
@@ -242,14 +293,20 @@ class Jit {
 
   public static function reload(name:String, src:String = null, ?o:JitOptions):JitModule {
     var m = mods.get(name);
-    var s = src != null ? src : (m == null ? null : m.src);
+    var s = src;
+    if (s == null && m != null && m.mainPath != "" && FileSystem.exists(m.mainPath)) {
+      try s = File.getContent(m.mainPath) catch (e:Dynamic) {}
+    }
+    if (s == null && m != null) s = m.src;
     if (s == null) return null;
     var opts:JitOptions = {force: true};
+    if (m != null && m.sourcePaths != null && src == null) opts.sources = m.sourcePaths;
     if (o != null) {
       if (o.opt != null) opts.opt = o.opt;
       if (o.std != null) opts.std = o.std;
       if (o.flags != null) opts.flags = o.flags;
       if (o.cache != null) opts.cache = o.cache;
+      if (o.sources != null) opts.sources = o.sources;
     }
     return compile(name, s, opts);
   }
@@ -339,7 +396,10 @@ class Jit {
       try src = File.getContent(w.path) catch (e:Dynamic) continue;
       if (src == w.sig) continue;
       w.sig = src;
-      var m = compile(w.name, src, {force: true});
+      var opts:JitOptions = {force: true};
+      var cur = mods.get(w.name);
+      if (cur != null && cur.sourcePaths != null) opts.sources = cur.sourcePaths;
+      var m = compile(w.name, src, opts);
       if (m.ok) {
         if (verbose) log("[jit] reloaded " + w.name);
         if (w.cb != null) w.cb(m);
@@ -407,7 +467,7 @@ class Jit {
     var run = function() {
       var r:Null<JitResult> = null;
       try {
-        r = comp.build(j.key, j.src, j.shift, j.sigs);
+        r = comp.build(j.key, j.src, j.shift, j.sigs, j.multi);
       } catch (e:Dynamic) {}
       j.result = r;
       j.done = true;
@@ -421,6 +481,7 @@ class Jit {
 
   static function finish(j:JitJob):Void {
     var m = new JitModule(j.name, nextId++, j.key, j.src);
+    m.extraSources = j.multi == null ? null : j.multi.texts;
     var r = j.result;
     if (r == null) {
       m.diag.push(diag("E_COMPILE", "compiler invocation failed"));
@@ -445,7 +506,7 @@ class Jit {
       return;
     }
     loader = savedLoader;
-    m.symbols = scan(j.src);
+    m.symbols = scanAll(m.allSources());
     m.ok = true;
     var prev = mods.get(j.name);
     if (prev != null) prev.dispose();
@@ -631,6 +692,43 @@ class Jit {
       }
     }
     return out;
+  }
+
+  public static function scanAll(texts:Array<String>):Array<String> {
+    var out:Array<String> = [];
+    var seen = new Map<String, Bool>();
+    for (t in texts) {
+      for (s in scan(t)) {
+        if (seen.exists(s)) continue;
+        seen.set(s, true);
+        out.push(s);
+      }
+    }
+    return out;
+  }
+
+  public static function compileFiles(name:String, mainPath:String, otherPaths:Array<String>, ?o:JitOptions):JitModule {
+    if (!FileSystem.exists(mainPath)) {
+      var m = new JitModule(name, nextId++, "", "");
+      m.diag.push(diag("E_NOFILE", mainPath));
+      return m;
+    }
+    var opts:JitOptions = {sources: otherPaths};
+    if (o != null) {
+      if (o.opt != null) opts.opt = o.opt;
+      if (o.std != null) opts.std = o.std;
+      if (o.flags != null) opts.flags = o.flags;
+      if (o.force != null) opts.force = o.force;
+      if (o.verbose != null) opts.verbose = o.verbose;
+      if (o.lineShift != null) opts.lineShift = o.lineShift;
+      if (o.sigs != null) opts.sigs = o.sigs;
+      if (o.loader != null) opts.loader = o.loader;
+      if (o.includes != null) opts.includes = o.includes;
+    }
+    var m = compile(name, File.getContent(mainPath), opts);
+    m.sourcePaths = otherPaths == null ? null : otherPaths.copy();
+    m.mainPath = mainPath;
+    return m;
   }
 
   public static function bind(name:String, f:Dynamic):Void {

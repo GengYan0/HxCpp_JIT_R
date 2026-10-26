@@ -8,6 +8,7 @@ coldcache_*/
 coldconc_*/
 sweeper_*/
 watchme.cpp
+multitu/
 test/bin/
 *.log
 *.pch
