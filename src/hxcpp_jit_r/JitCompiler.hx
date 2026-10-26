@@ -34,6 +34,7 @@ class JitCompiler {
   public var usePch:Bool = true;
   #if target.threaded
   static var pchLock = new sys.thread.Mutex();
+  static var active:Int = 0;
   #end
   var pchState:Int = 0;
   var pchFile:String = "";
@@ -203,7 +204,9 @@ class JitCompiler {
     a.push(cpp);
     a.push("-o");
     a.push(out);
-    if (backend == "gcc") a.push("-Wl,-undefined,dynamic_lookup");
+    #if mac
+    if (backend == "gcc" || backend == "clang") a.push("-Wl,-undefined,dynamic_lookup");
+    #end
     return a;
   }
 
@@ -211,11 +214,24 @@ class JitCompiler {
     var p = new sys.io.Process(tool.exe, args);
     var name = haxe.io.Path.withoutDirectory(tool.exe);
     var timer:Null<haxe.Timer> = null;
-    if (timeoutMs > 0) {
+    var killed = [false];
+    var timedOut = timeoutMs > 0;
+    if (timedOut) {
+      #if target.threaded
+      active++;
+      #end
       try {
         timer = haxe.Timer.delay(function() {
           try {
-            Sys.command("taskkill", ["/F", "/IM", name]);
+            #if target.threaded
+            if (active > 1) return;
+            #end
+            killed[0] = true;
+            #if windows
+            Sys.command("taskkill", ["/F", "/T", "/IM", name]);
+            #else
+            Sys.command("pkill", ["-TERM", name]);
+            #end
           } catch (e:Dynamic) {}
         }, timeoutMs);
       } catch (e:Dynamic) {}
@@ -225,6 +241,12 @@ class JitCompiler {
     var code = p.exitCode();
     p.close();
     if (timer != null) timer.stop();
+    if (timedOut) {
+      #if target.threaded
+      active--;
+      #end
+    }
+    if (killed[0] && code == 0) code = -9;
     #if windows
     var cp = JitNative.getACP();
     return {code: code, out: JitNative.decode(ob, cp), err: JitNative.decode(eb, cp)};

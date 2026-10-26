@@ -267,6 +267,16 @@ int first(std::string s) { return s.empty() ? -1 : (int)s[0]; }
     eq("first char", Std.string(sm.callAuto("first", [], ["A"])), "65");
     eq("empty string len", Std.string(sm.callAuto("lens", [], [""])), "0");
     eq("missing str arg", Std.string(sm.callAuto("lens", [], [])), "0");
+    var sm2 = Jit.compile("strs2", 'int rev(const char* s, int n) { return (int)strlen(s) * 100 + n; }
+int six(int a, int b, int c, int d, int e, int f) { return a + b * 2 + c * 3 + d * 4 + e * 5 + f * 6; }
+int sn(std::string a, int m, std::string b, int n) { return (int)a.size() * 1000 + m * 100 + (int)b.size() * 10 + n; }
+');
+    ok("mixed compile", sm2.ok, sm2.diag.length > 0 ? JitCompiler.describe(sm2.diag[0]) : "");
+    eq("sig rev", sm2.signature("rev"), "i(si)");
+    eq("sig six", sm2.signature("six"), "i(iiiiii)");
+    eq("rev str then int", Std.string(sm2.callAuto("rev", [7], ["abc"])), "307");
+    eq("six numeric args", Std.string(sm2.callAuto("six", [1, 2, 3, 4, 5, 6])), "91");
+    eq("string int interleave", Std.string(sm2.callAuto("sn", [2, 3], ["abcd", "xy"])), "4223");
 
     head("struct and array access");
     var stc = Jit.compile("agg", 'struct Vec2 { double x; double y; };
@@ -427,6 +437,28 @@ double sum_all() { double s = 0; for (int i = 0; i < 16; i++) s += samples[i]; r
     ok("raw roundtrip", bk.readRaw("samples") != null && bk.readRaw("samples").length == 128, "");
     ok("bulk rejects non array", bk.readDoubles("nope").length == 0 && !bk.writeDoubles("nope", [1]), "");
 
+    head("pointer handle");
+    var addr = bk.arrayAddress("samples");
+    var pt = hxcpp_jit_r.JitPtr.of(addr);
+    ok("ptr not null", !pt.isNull(), pt.toString());
+    ok("ptr readable", pt.valid(), pt.toString());
+    eq("ptr read f64", Std.string(pt.readF64(8)), "1");
+    ok("ptr write f64", pt.writeF64(42.5, 8), "");
+    eq("ptr write visible", Std.string(bk.readDoubles("samples")[1]), "42.5");
+    ok("ptr restore", pt.writeF64(2, 8), "");
+    eq("ptr offset", Std.string(pt.offset(8).address == addr + 8), "true");
+    var np = new hxcpp_jit_r.JitPtr(0);
+    ok("null ptr safe", np.readF64() == 0 && np.readI32() == 0 && !np.writeI32(1) && np.readBytes(4) == null, "");
+
+    head("auto sweep hook");
+    var km = Jit.compile("sweepkeep", "double kv(double v) { return v + 1; }\n");
+    ok("sweep keep compile", km.ok, km.diag.length > 0 ? JitCompiler.describe(km.diag[0]) : "");
+    Jit.autoSweepEvery = 1;
+    Jit.autoSweepKeep = 64;
+    for (i in 0...4) Jit.tick();
+    Jit.autoSweepEvery = 0;
+    eq("module survives sweep", Std.string(km.callAuto("kv", [41])), "42");
+
     head("fast call");
     var fcm = Jit.compile("fastc", "RJIT(sq) { return RJIT_A0 * RJIT_A0; }\n");
     ok("fast compile", fcm.ok, "");
@@ -451,11 +483,14 @@ double sum_all() { double s = 0; for (int i = 0; i < 16; i++) s += samples[i]; r
     eq("watched initial", Std.string(wm == null ? -1 : wm.callAuto("wv", [])), "1");
     sys.io.File.saveContent(wpath, "double wv() { return 2; }\n");
     Jit.watchEvery = 1;
-    for (i in 0...8) {
+    var tries = 0;
+    wm = Jit.get("watched");
+    while (tries < 40 && (wm == null || wm.callAuto("wv", []) != 2)) {
       Jit.tick();
       Sys.sleep(0.02);
+      tries++;
+      wm = Jit.get("watched");
     }
-    wm = Jit.get("watched");
     eq("watched reloaded", Std.string(wm == null ? -1 : wm.callAuto("wv", [])), "2");
     ok("unwatch", Jit.unwatch(wpath), "");
     sys.io.File.saveContent(wpath, "double wv() { return 3; }\n");

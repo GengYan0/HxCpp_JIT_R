@@ -199,7 +199,8 @@ class JitScan {
         if (c == "s" || c == "S") strArgs++;
         args.push(c);
       }
-      if (args.length > 4) ok = false;
+      if (args.length > 6) ok = false;
+      if (args.length - strArgs > 6) ok = false;
       if (strArgs > 4) ok = false;
       var rc = code(ret);
       if (rc == "v" && !isVoid(ret)) ok = false;

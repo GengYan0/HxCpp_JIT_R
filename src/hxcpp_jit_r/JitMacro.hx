@@ -5,7 +5,6 @@ import haxe.macro.Expr;
 
 class JitMacro {
   public static function auto():Expr {
-    haxe.macro.Compiler.define("jit_auto");
     haxe.macro.Compiler.include("hxcpp_jit_r");
     return macro null;
   }

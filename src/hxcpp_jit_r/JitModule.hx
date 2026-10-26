@@ -427,11 +427,14 @@ class JitModule {
   }
 
   public function dispose():Void {
-    if (handle == 0) return;
-    var d = resolve("rjit_deinit");
-    if (d != 0) JitNative.invoke(d, ctx, 0, 0, 0, 0, 0, 0, 0);
+    Jit.forget(this);
+    if (handle != 0) {
+      var d = resolve("rjit_deinit");
+      if (d != 0) JitNative.invoke(d, ctx, 0, 0, 0, 0, 0, 0, 0);
+    }
     JitHost.remove(id);
     if (ctx != 0) JitNative.freeCtx(ctx);
+    if (handle == 0) return;
     Jit.retire(handle, image);
     image = null;
     handle = 0;

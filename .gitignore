@@ -5,6 +5,9 @@ jitcache/
 packout/
 packcold/
 coldcache_*/
+coldconc_*/
+sweeper_*/
+watchme.cpp
 test/bin/
 *.log
 *.pch

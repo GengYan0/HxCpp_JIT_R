@@ -1,12 +1,12 @@
 {
   "name": "hxcpp_jit_r",
-  "url": "https://github.com/GengYan0/hxcpp_jit_r",
+  "url": "https://github.com/GengYan0/HxCpp_JIT_R",
   "license": "MIT",
   "tags": ["cpp", "jit", "native", "windows", "msvc", "runtime", "hot-reload"],
-  "description": "Compile and execute native C++ at runtime inside hxcpp applications, with automatic signatures, string arguments, struct and array access, hot reload, crash isolation and manual PE loading.",
-  "version": "0.0.10",
+  "description": "Compile and call native C++ from a hxcpp application at runtime.",
+  "version": "0.0.11",
   "classPath": "src",
-  "releasenote": "beta: bulk array transfer, file watch, callFast, manual loader, string arguments, struct and array access",
+  "releasenote": "beta: mixed numeric and string arguments, six argument calls, pointer read and write, per-call options, unwind table release",
   "contributors": ["GengYan0"],
   "dependencies": {}
 }

@@ -25,6 +25,7 @@ private typedef JitJob = {
   key:String,
   shift:Int,
   sigs:Array<String>,
+  loader:String,
   cb:Null<JitModule>->Void,
   done:Bool,
   result:Null<JitResult>
@@ -54,6 +55,10 @@ class Jit {
   public static var autoSweepEvery:Int = 0;
   static var sinceSweep:Int = 0;
   static var frame:Int = 0;
+  static var defaultOpt:String = "O2";
+  static var defaultStd:String = "c++17";
+  static var defaultFlags:Array<String> = [];
+  static var defaultLoader:String = "loadlib";
   static var watched:Array<{path:String, name:String, sig:String, cb:Null<JitModule->Void>}> = [];
   public static var watchEvery:Int = 30;
   static var watchTick:Int = 0;
@@ -75,11 +80,15 @@ class Jit {
     tool = JitToolchain.detect(o != null && o.backend != null ? o.backend : "auto");
     compiler = new JitCompiler(tool, cache);
     if (o != null) {
-      if (o.opt != null) compiler.opt = normOpt(o.opt);
-      if (o.std != null) compiler.std = o.std;
-      if (o.flags != null) compiler.extra = o.flags;
-      if (o.loader != null) loader = o.loader;
+      if (o.opt != null) defaultOpt = normOpt(o.opt);
+      if (o.std != null) defaultStd = o.std;
+      if (o.flags != null) defaultFlags = o.flags.copy();
+      if (o.loader != null) defaultLoader = o.loader;
     }
+    compiler.opt = defaultOpt;
+    compiler.std = defaultStd;
+    compiler.extra = defaultFlags.copy();
+    loader = defaultLoader;
     if (!tool.ready) {
       ready = false;
       lastError = tool.error;
@@ -108,10 +117,10 @@ class Jit {
   }
 
   static function applyFlags(o:Null<JitOptions>):Void {
-    if (o == null) return;
-    if (o.opt != null) compiler.opt = normOpt(o.opt);
-    if (o.std != null) compiler.std = o.std;
-    if (o.flags != null) compiler.extra = o.flags;
+    if (compiler == null) return;
+    compiler.opt = o == null || o.opt == null ? defaultOpt : normOpt(o.opt);
+    compiler.std = o == null || o.std == null ? defaultStd : o.std;
+    compiler.extra = o == null || o.flags == null ? defaultFlags.copy() : o.flags.copy();
   }
 
   static function flagStr(o:Null<JitOptions> = null):String {
@@ -128,13 +137,22 @@ class Jit {
   }
 
   public static function compile(name:String, src:String, ?o:JitOptions):JitModule {
+    var savedVerbose = verbose;
+    var savedLoader = loader;
+    if (o != null && o.verbose != null) verbose = o.verbose;
+    if (o != null && o.loader != null) loader = o.loader;
+    var m = compileNow(name, src, o);
+    verbose = savedVerbose;
+    loader = savedLoader;
+    return m;
+  }
+
+  static function compileNow(name:String, src:String, ?o:JitOptions):JitModule {
     if (debug) log("[jit] compile enter " + name);
     ensure();
     if (debug) log("[jit] ensured " + ready);
     var m = new JitModule(name, nextId++, "", src);
     applyFlags(o);
-    if (o != null && o.verbose != null) verbose = o.verbose;
-    if (o != null && o.loader != null) loader = o.loader;
     var key = JitCache.key(src, flagStr(o));
     m.key = key;
     if (!ready) {
@@ -214,6 +232,7 @@ class Jit {
       key: key,
       shift: o == null ? 0 : (o.lineShift ?? 0),
       sigs: o == null ? null : o.sigs,
+      loader: o == null || o.loader == null ? loader : o.loader,
       cb: cb,
       done: false,
       result: null
@@ -272,6 +291,12 @@ class Jit {
     for (n in names) dispose(n);
   }
 
+  public static function forget(m:JitModule):Void {
+    if (m == null) return;
+    var cur = mods.get(m.name);
+    if (cur == m) mods.remove(m.name);
+  }
+
   public static function retire(h:cpp.SizeT, image:JitImage = null):Void {
     if (h != 0 || image != null) retired.push({h: h, t: frame, image: image});
   }
@@ -326,6 +351,7 @@ class Jit {
 
   public static function tick():Void {
     frame++;
+    tickSweep();
     if (watched.length > 0) {
       watchTick++;
       if (watchTick >= watchEvery) {
@@ -366,7 +392,13 @@ class Jit {
       var j = queue.shift();
       running++;
       jobs.push(j);
-      start(j);
+      try {
+        start(j);
+      } catch (e:Dynamic) {
+        running--;
+        j.result = null;
+        j.done = true;
+      }
     }
   }
 
@@ -404,11 +436,15 @@ class Jit {
       j.cb(m);
       return;
     }
+    var savedLoader = loader;
+    if (j.loader != null) loader = j.loader;
     if (!load(m, r.dll)) {
+      loader = savedLoader;
       if (verbose) Sys.println('[jit] ${j.name} async load failed');
       j.cb(m);
       return;
     }
+    loader = savedLoader;
     m.symbols = scan(j.src);
     m.ok = true;
     var prev = mods.get(j.name);
@@ -457,7 +493,7 @@ class Jit {
         m.image = image;
         h = image.base;
       } else if (loader == "manual") {
-        m.diag.push(diag("E_PE", image.error));
+        m.diag.push(diag("E_IMAGE", image.error));
         return false;
       } else if (debug) {
         log("[jit] manual map skipped: " + image.error);
@@ -481,7 +517,7 @@ class Jit {
         return false;
       }
     }
-    var c = JitNative.mkctx(m.id);
+    var c = JitNative.mkctx(m.id, JitAbi.VERSION);
     if (c == 0) {
       if (m.image != null) JitLoader.unload(m.image) else JitNative.unloadDll(h);
       m.image = null;

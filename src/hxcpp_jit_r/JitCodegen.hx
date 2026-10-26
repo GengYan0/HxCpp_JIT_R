@@ -5,7 +5,7 @@ import hxcpp_jit_r.JitScan.JitVarInfo;
 import hxcpp_jit_r.JitScan.JitStructInfo;
 
 class JitCodegen {
-  public static inline var BUILD:Int = 7;
+  public static inline var BUILD:Int = 8;
 
   public static function emit(fns:Array<JitFnInfo>, vars:Array<JitVarInfo>, extra:Array<String> = null, structs:Array<JitStructInfo> = null):String {
     var b = new StringBuf();
@@ -100,6 +100,7 @@ class JitCodegen {
     var argSigs = sig.substr(p + 1, sig.length - p - 2);
     var types:Array<String> = [];
     var expr:Array<String> = [];
+    var numSlot = 0;
     var strSlot = 0;
     for (i in 0...argSigs.length) {
       var c = argSigs.charAt(i);
@@ -108,7 +109,8 @@ class JitCodegen {
         expr.push(argExpr(c, strSlot));
         strSlot++;
       } else {
-        expr.push(argExpr(c, i));
+        expr.push(argExpr(c, numSlot));
+        numSlot++;
       }
     }
     var name = dispName(sig);

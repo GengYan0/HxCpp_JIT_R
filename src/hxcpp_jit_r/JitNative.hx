@@ -121,13 +121,13 @@ class JitNative {
     }
     RJitCtx* c = (RJitCtx*)malloc(sizeof(RJitCtx));
     if (c == 0) return (size_t)0;
-    c->abi = 5;
+    c->abi = abi;
     c->pad = 0;
     c->h = &table;
     c->m = (void*)(size_t)modId;
     return (size_t)c;
   ')
-  public static function mkctx(modId:Int):cpp.SizeT return 0;
+  public static function mkctx(modId:Int, abi:Int = 5):cpp.SizeT return 0;
 
   @:functionCode('free((void*)ctx);')
   public static function freeCtx(ctx:cpp.SizeT):Void {}
@@ -262,7 +262,11 @@ class JitNative {
     a.a[3] = a3;
     a.a[4] = a4;
     a.a[5] = a5;
+#ifdef _WIN32
+    return rjit_guard3(reinterpret_cast<double(*)(void*,RJitArgs*)>(disp), (void*)(size_t)f, &a);
+#else
     return reinterpret_cast<double(*)(void*,RJitArgs*)>(disp)((void*)f, &a);
+#endif
   ')
   public static function invokeDisp(disp:cpp.SizeT, f:cpp.SizeT, n:Int, a0:Float, a1:Float, a2:Float, a3:Float, a4:Float, a5:Float):Float return 0;
 
@@ -525,6 +529,18 @@ class JitNative {
   ')
   public static function peek(p:cpp.SizeT, w:Int):Float return 0;
 
+  @:functionCode('return *(volatile double*)(size_t)p;')
+  public static function readF64(p:cpp.SizeT):Float return 0;
+
+  @:functionCode('*(volatile double*)(size_t)p = v;')
+  public static function writeF64(p:cpp.SizeT, v:Float):Void {}
+
+  @:functionCode('return *(volatile float*)(size_t)p;')
+  public static function readF32(p:cpp.SizeT):Float return 0;
+
+  @:functionCode('*(volatile float*)(size_t)p = (float)v;')
+  public static function writeF32(p:cpp.SizeT, v:Float):Void {}
+
   @:functionCode('
     if (w <= 1) { *(volatile unsigned char*)(size_t)p = (unsigned char)v; return; }
     if (w == 2) { *(volatile unsigned short*)(size_t)p = (unsigned short)v; return; }
@@ -573,6 +589,29 @@ class JitNative {
 #endif
   ')
   public static function addFnTable(table:cpp.SizeT, count:Int, base:cpp.SizeT):Int return 0;
+
+  @:functionCode('
+#ifdef _WIN32
+    typedef unsigned char (WINAPI *RJitDelFn)(void*);
+    static RJitDelFn cached = 0;
+    static bool looked = false;
+    if (!looked) {
+      looked = true;
+      HMODULE m = GetModuleHandleA("kernel32.dll");
+      if (m == 0) m = LoadLibraryA("kernel32.dll");
+      if (m != 0) cached = (RJitDelFn)GetProcAddress(m, "RtlDeleteFunctionTable");
+      if (cached == 0) {
+        HMODULE n = GetModuleHandleA("ntdll.dll");
+        if (n != 0) cached = (RJitDelFn)GetProcAddress(n, "RtlDeleteFunctionTable");
+      }
+    }
+    if (cached == 0) return 0;
+    return cached((void*)(size_t)table) ? 1 : 0;
+#else
+    return 0;
+#endif
+  ')
+  public static function delFnTable(table:cpp.SizeT):Int return 0;
 
   @:functionCode('
 #ifdef _WIN32

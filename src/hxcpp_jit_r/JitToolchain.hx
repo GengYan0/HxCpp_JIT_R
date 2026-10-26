@@ -145,7 +145,7 @@ class JitToolchain {
       var p = which(n);
       if (p == null) continue;
       t.exe = p;
-      t.backend = "gcc";
+      t.backend = n == "clang++" ? "clang" : "gcc";
       t.bin = [dirOf(p)];
       t.ready = true;
       t.origin = "posix";
@@ -179,7 +179,12 @@ class JitToolchain {
   static function splitEnv(v:String):Array<String> {
     var out = [];
     if (v == null) return out;
-    for (p in v.split(";")) {
+    #if windows
+    var sep = ";";
+    #else
+    var sep = ":";
+    #end
+    for (p in v.split(sep)) {
       var q = StringTools.trim(p);
       if (q != "") out.push(normalize(q));
     }

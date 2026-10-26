@@ -38,6 +38,8 @@ class JitImage {
   public var tlsZero:Int = 0;
   public var relocCount:Int = 0;
   public var rebased:Bool = false;
+  public var fnTable:cpp.SizeT = 0;
+  public var fnCount:Int = 0;
   public var ok:Bool = false;
   public var error:String = "";
   public var manual:Bool = false;
@@ -377,6 +379,13 @@ class JitLoader {
     }
   }
 
+  static function unregisterUnwind(img:JitImage):Void {
+    if (img.fnTable == 0) return;
+    JitNative.delFnTable(img.fnTable);
+    img.fnTable = 0;
+    img.fnCount = 0;
+  }
+
   static function teardownTls(img:JitImage):Void {
     if (img.tlsIndex >= 0) {
       JitNative.clearTls(img.tlsIndex);
@@ -414,7 +423,11 @@ class JitLoader {
     if (d.rva == 0 || d.size < 12) return;
     var first = Std.int(JitNative.peek(at(img.base, d.rva), 4));
     if (first == 0) return;
-    JitNative.addFnTable(at(img.base, d.rva), Std.int(d.size / 12), img.base);
+    var n = Std.int(d.size / 12);
+    var t = at(img.base, d.rva);
+    if (JitNative.addFnTable(t, n, img.base) == 0) return;
+    img.fnTable = t;
+    img.fnCount = n;
   }
 
   public static function proc(img:JitImage, name:String):cpp.SizeT {
@@ -457,6 +470,7 @@ class JitLoader {
     }
     if (img.entry != 0) JitNative.callEntry(at(img.base, img.entry), img.base, 0, 0);
     teardownTls(img);
+    unregisterUnwind(img);
     img.fwdCache = new Map();
     releaseLibs(img);
     images.remove(Std.string(img.base));

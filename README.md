@@ -1,10 +1,10 @@
-# hxcpp_jit_r
+# HxCpp_JIT_R
 
-Beta 0.0.10
+Beta 0.0.11
 
-Compile and execute native C++ inside a running hxcpp application. Source is compiled into a dynamic library at runtime and loaded; exported functions are called through a flat C ABI.
+Compile and call native C++ while your application is running. Hand it a source string, get a module back, call its functions like any Haxe method.
 
-No engine source changes, no relinking the executable, no `.cpp` entries in the project file.
+Behind the call the source goes into a cache directory, is compiled into a shared library, loaded, and invoked through a small flat C ABI generated for you.
 
 ---
 
@@ -42,7 +42,7 @@ On Windows `cl.exe` and the Windows SDK must be reachable. The first call scans 
 ## Install
 
 ```bash
-haxelib dev hxcpp_jit_r /path/to/hxcpp_jit_r
+haxelib dev hxcpp_jit_r /path/to/HxCpp_JIT_R
 ```
 
 ```xml
@@ -182,6 +182,18 @@ The standard library, inline assembly, SIMD intrinsics and templates all work. T
 | `signature(name)` / `signatures(name)` / `hasSig(sig)` | Signature info |
 | `address(name)` / `ptr(name)` | Function address / `JitPtr` |
 | `has(name)` / `report()` / `dispose()` | Misc |
+
+### JitPtr
+
+| Member | Meaning |
+|---|---|
+| `address` / `isNull()` | Raw address and null check |
+| `valid()` | Address is non-null and readable |
+| `offset(delta)` | New handle at `address + delta` |
+| `readF64(at)` / `readF32(at)` | Read a `double` / `float` |
+| `readI32(at)` / `readU16(at)` / `readU8(at)` | Read integers |
+| `writeF64(v, at)` / `writeF32(v, at)` / `writeI32(v, at)` | Write |
+| `readBytes(len, at)` / `writeBytes(bytes, at)` | Raw buffer transfer |
 
 ### JitSession
 
@@ -421,7 +433,12 @@ m.signature("clamp");            // "d(ddd)"
 m.callSig("area", "i(i)", [3]);  // pick one overload
 ```
 
-Up to six numeric arguments and four string arguments.
+Up to six numeric arguments and four string arguments. Numeric and string arguments may appear in any order;
+numeric arguments pack into `a[0..]` in source order and string arguments into `s[0..]` in source order.
+
+```haxe
+m.callAuto("sn", [2, 3], ["abcd", "xy"]);  // int sn(std::string a, int m, std::string b, int n)
+```
 
 ---
 
@@ -442,7 +459,7 @@ Jit.setup({
 |---|---|---|
 | `Jit.maxParallel` | `2` | Concurrent compiler processes |
 | `Jit.watchEvery` | `30` | Ticks between file polls |
-| `Jit.autoSweepEvery` | `0` | Sweep the cache every N builds, 0 disables |
+| `Jit.autoSweepEvery` | `0` | Sweep the cache every N `tick()` calls, 0 disables |
 | `Jit.autoSweepKeep` | `24` | Directories kept by a sweep |
 | `Jit.verbose` | `true` | Build logging |
 | `Jit.debug` | `false` | Detailed tracing |
@@ -476,14 +493,14 @@ Time goes into compiler process startup and linking, not into the amount of code
 - SEH catches hardware exceptions only; C++ exceptions across the boundary are undefined
 - Build timeout terminates the compiler process
 - Struct accessors cover first-level numeric fields; nested structs and pointer members need a helper function
-- Manual mapping implements the Windows PE format only; ELF uses the system loader
+- Manual mapping implements the Windows PE (Portable Executable) format only; ELF uses the system loader
 - Changing the ABI header layout requires clearing the host precompiled header and rebuilding
 
 ---
 
 ## Testing
 
-`test/` is a standalone console project with 181 assertions.
+`test/` is a standalone console project with 197 assertions.
 
 ```
 cd test

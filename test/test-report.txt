@@ -1,0 +1,299 @@
+[jit] backend probe
+  backend=msvc exe=C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/VC/Tools/MSVC/14.29.30133/bin/HostX64/x64/cl.exe arch=x64 origin=C:/Program Files (x86)/Microsoft Visual Studio/2019/Community
+  PASS setup ready  2ms
+
+== backend fallback ==
+  PASS request clang  resolved backend=msvc
+  PASS request msvc  resolved backend=msvc
+
+== core ==
+  PASS compile  cached
+  PASS add
+  PASS mul
+  PASS host callback
+  PASS retstr
+  PASS host log
+  PASS fib(30)
+  PASS undefined fn
+  PASS address  0xB1000
+  PASS symbols
+
+== diagnostics line accuracy ==
+  PASS bad compile fails
+  PASS diag count  1 entries
+  PASS diag line == 3
+
+== eval offset ==
+  PASS eval value
+  PASS eval diag line == 2
+
+== session ==
+  PASS session eval 1
+  PASS session a
+  PASS session eval 2
+  PASS session b sees a
+  PASS session eval 3
+  PASS session var bridge
+  PASS session redeclare
+  PASS session a redeclared
+
+== parallel compile gate ==
+  PASS all jobs finished  9/9
+  PASS peak <= maxParallel  peak=3
+  PASS peak >= 2  peak=3
+  PASS module registered  mods=11 names=par1,par2,par3,par4,eval_0DFC9D48,par5,par6,par7,par8,par0,core
+  PASS par result
+
+== hot reload stress ==
+  PASS reload final value
+  PASS modules alive  12 modules
+
+== large source ==
+  PASS 200 functions compile  0ms, 200 symbols
+  PASS f199(2)
+
+== cache ==
+  PASS second is cached
+  PASS cached value
+
+== auto signature ==
+  PASS scanner in cpp  found=1 sig=d(d)
+  PASS scanner vars in cpp  found=1
+  PASS auto compile  0ms  sigs=d(d) i(ii) v() d(id)  
+  PASS half(10)
+  PASS addi(3,4)
+  PASS mixd(2,0.5)
+  PASS twice(21)
+  PASS halfF(5) float ret/arg
+  PASS isPos(1) bool ret
+  PASS isPos(-1) bool ret
+  PASS bumpc(65) char ret
+  PASS twiceU(7) unsigned
+  PASS sig halfF
+  PASS sig isPos
+  PASS explicit sig call  4.5
+  PASS missing sig rejected
+  PASS hasSig
+  PASS var counter init
+  PASS var after bump
+  PASS setVar
+  PASS var after set+bump
+  PASS const var exposed  3.14159
+  PASS unknown var rejected
+
+== session state across evals ==
+  PASS state eval 1
+  PASS heal(5)
+  PASS state eval 2
+  PASS hp survived recompile
+  PASS dmg(3)
+  PASS hp after dmg
+  PASS state eval 3
+  PASS bonus(2) sees hp
+
+== crash guard ==
+  PASS crash module compiled
+  PASS crash returns 0
+  PASS onError fired
+
+== pointer handle ==
+  PASS fn ptr not null  JitPtr(0x0000D3431030)
+  PASS ptr format
+  PASS null ptr
+
+== overload ==
+  PASS overload compiled
+  PASS overload sig count
+  PASS overload int
+  PASS overload double
+
+== scanner struct/array ==
+  PASS struct parsed  A/2
+  PASS array parsed  array:d:5
+  PASS struct var parsed  struct:P
+
+== posix backend args ==
+  PASS posix -shared  -shared -fPIC -O2 -std=c++17 -DNDEBUG -DRJIT_DEFINE_ABI_EXPORT -fvisibility=hidden -include /c/h.h -I/c -I/d m.cc -o m.so
+  PASS posix -fPIC
+  PASS posix -std
+  PASS posix opt
+  PASS posix -include header
+  PASS posix visibility
+  PASS posix Od to O0
+
+== string args ==
+  PASS needsStringHeader
+  PASS no header needed
+  PASS string compile
+  PASS sig lens
+  PASS sig adds
+  PASS lens hello
+  PASS lens utf8
+  PASS mixs int+str
+  PASS adds two strings
+  PASS first char
+  PASS empty string len
+  PASS missing str arg
+  PASS mixed compile
+  PASS sig rev
+  PASS sig six
+  PASS rev str then int
+  PASS six numeric args
+  PASS string int interleave
+
+== struct and array access ==
+  PASS agg compile
+  PASS kind pos  struct
+  PASS fields pos  x,y
+  PASS get pos.x init
+  PASS set pos.x
+  PASS get pos.x
+  PASS set pos.y
+  PASS get pos.y
+  PASS set hero.hp
+  PASS get hero.hp
+  PASS set hero.spd
+  PASS get hero.spd
+  PASS arr size
+  PASS set arr[2]
+  PASS get arr[2]
+  PASS arr oob returns 0
+  PASS set ids[0]
+  PASS get ids[0]
+  PASS dbg ids getIndex0
+  PASS dbg ids setIndex1
+  PASS dbg ids getIndex1
+  PASS unknown field nan
+
+== aggregate state across eval ==
+  PASS agg eval 1
+  PASS agg session x
+  PASS agg eval 2
+  PASS agg survived recompile
+
+== manual loader ==
+  PASS manual compile+load
+  PASS manual mapped  sections=6 imports=KERNEL32.dll reloc=0 rebased=false
+  PASS manual sq(7)
+  PASS manual add3
+  PASS manual second module
+  PASS manual tri
+  PASS manual unloaded  base=6442450944 images=0
+  PASS loadlib still works
+
+== pack export / import ==
+  PASS export files  369 files
+  PASS pack manifest ok  pack ok: abi=5 codegen=8 platform=windows-x64 modules=273 bytes=24939008
+  PASS manifest exists
+  PASS headline dll packed
+
+== cache-only mode (no toolchain) ==
+  PASS cold compile
+  PASS toolchain disabled  toolchain disabled by forceUnavailable
+  PASS no cache yet fails  jit: error E_TOOLCHAIN toolchain disabled by forceUnavailable
+  PASS import files  555 files
+  PASS cache-only hit  cached=true
+  PASS cache-only call
+  PASS toolchain restored
+
+== edge cases ==
+  PASS empty source compiles
+  PASS empty has no funcs
+  PASS broken source rejected  line 1: error C2561 “f”: 函数必须返回值
+  PASS broken has no dll
+  PASS bad sig returns 0
+  PASS unknown fn returns 0
+  PASS unknown path is nan
+  PASS double dispose safe
+
+== concurrent cold build ==
+  PASS cold cache switched  I:\Haxelib\hxcpp_jit_r\test\coldconc_952184
+  PASS concurrent cold build  done=4 pending=0 ticks=36
+  PASS cache restored  I:\Haxelib\hxcpp_jit_r\test\jitcache
+
+== bulk array io ==
+  PASS bulk compile
+  PASS write doubles
+  PASS read doubles count
+  PASS read doubles edges
+  PASS native sees bulk data
+  PASS write ints
+  PASS read ints full
+  PASS read ints partial
+  PASS array address
+  PASS write doubles clamps
+  PASS clamped count
+  PASS clamped last
+  PASS raw roundtrip
+  PASS bulk rejects non array
+
+== pointer handle ==
+  PASS ptr not null  JitPtr(0x0000C69169E0)
+  PASS ptr readable  JitPtr(0x0000C69169E0)
+  PASS ptr read f64
+  PASS ptr write f64
+  PASS ptr write visible
+  PASS ptr restore
+  PASS ptr offset
+  PASS null ptr safe
+
+== auto sweep hook ==
+  PASS sweep keep compile
+  PASS module survives sweep
+
+== fast call ==
+  PASS fast compile
+  PASS fast matches call  -805274.-194 vs -805274.-194
+  PASS both paths measurably fast  call=0.028us  fast=0.026us
+
+== file watch ==
+  PASS watch registered
+  PASS watched listed  watchme.cpp
+  PASS watched initial
+  PASS watched reloaded
+  PASS unwatch
+  PASS stops after unwatch
+
+== throughput ==
+  PASS 500k calls  0.046us/call  acc=14000000
+
+== stability ==
+  PASS no broken modules  0 broken
+
+[jit] RESULT PASS  (197 passed, 0 failed)
+[jit] ready=true builds=34 cacheHits=68 modules=33
+  backend=msvc exe=C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/VC/Tools/MSVC/14.29.30133/bin/HostX64/x64/cl.exe arch=x64 origin=environment
+  cache=I:\Haxelib\hxcpp_jit_r\test\jitcache size=29661KB
+  module=big id=67 symbols=200 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/262AA74E2BF385F0/mod.dll
+  module=agg id=71 symbols=0 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/03E070193A52D6FF/mod.dll
+  module=hotstress id=70 symbols=1 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/041ED0A9312A9D17/mod11.dll
+  module=strs id=73 symbols=0 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/112EF1D11E7EBC7F/mod.dll
+  module=eval_0DFC9D48 id=74 symbols=1 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/274189E907A1E1FB/mod.dll
+  module=cold id=89 symbols=0 calls=1 dll=I:\Haxelib\hxcpp_jit_r\test\coldcache_980679/3B5A004E2B6C214C/mod.dll
+  module=cachedemo id=80 symbols=1 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/05E9AD8B098FE2E5/mod.dll
+  module=fastc id=100 symbols=1 calls=4000000 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/09EBEF1B11AD71B1/mod.dll
+  module=crash id=83 symbols=0 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/130B4769281028CF/mod.dll
+  module=perf id=103 symbols=1 calls=500000 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/2AED63FD037CF037/mod.dll
+  module=guard2 id=92 symbols=0 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/22402AB717034C95/mod.dll
+  module=empty id=90 symbols=0 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/339EA5082D99B08A/mod.dll
+  module=watched id=102 symbols=0 calls=3 dll=I:/Haxelib/hxcpp_jit_r/test/jitcache/1F8C232C3EBCFA1A/mod10.dll
+  module=conc0 id=94 symbols=0 calls=0 dll=I:/Haxelib/hxcpp_jit_r/test/coldconc_952184/0B6C54C92C2FB213/mod.dll
+  module=par0 id=85 symbols=1 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/2A7A52E005CBE4B2/mod.dll
+  module=auto id=84 symbols=0 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/12AC88772109BB49/mod.dll
+  module=par1 id=66 symbols=1 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/2733544B14882359/mod.dll
+  module=strs2 id=68 symbols=0 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/12DBC068006963D2/mod.dll
+  module=conc1 id=95 symbols=0 calls=0 dll=I:/Haxelib/hxcpp_jit_r/test/coldconc_952184/300212D40DD30DA6/mod.dll
+  module=par2 id=69 symbols=1 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/1F7C3AF93F48149B/mod.dll
+  module=conc2 id=96 symbols=0 calls=0 dll=I:/Haxelib/hxcpp_jit_r/test/coldconc_952184/3241794906A93157/mod.dll
+  module=sweepkeep id=99 symbols=0 calls=1 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/09706AFB1F359D51/mod.dll
+  module=par3 id=72 symbols=1 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/2BF0D39B114ABE55/mod.dll
+  module=conc3 id=97 symbols=0 calls=0 dll=I:/Haxelib/hxcpp_jit_r/test/coldconc_952184/2BB14E7406526802/mod.dll
+  module=bulk id=98 symbols=0 calls=1 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/3D3168342C4206F2/mod.dll
+  module=par4 id=75 symbols=1 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/0FF1659A2B4F39FC/mod.dll
+  module=par5 id=77 symbols=1 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/1831C0790BCC415B/mod.dll
+  module=over id=78 symbols=0 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/1BC066E0205A8E26/mod.dll
+  module=par6 id=79 symbols=1 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/2B6459781D36F95A/mod.dll
+  module=par7 id=81 symbols=1 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/156746763101148C/mod.dll
+  module=par8 id=82 symbols=1 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/2097B2EF0F729BF9/mod.dll
+  module=core id=86 symbols=6 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/1D8B33B51125D6DF/mod.dll
+  module=loadlib id=87 symbols=0 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/2C91306309D52E49/mod.dll
