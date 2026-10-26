@@ -45,7 +45,9 @@ class JitCodegen {
         var fnty = retType(f.ret) + "(*)(" + [for (a in f.args) cppType(a)].join(",") + ")";
         b.add('extern "C" RJIT_API double rjit_ptr_' + key + '(RJitCtx* ctx, RJitArgs* args) { return (double)(size_t)(void*)(' + fnty + ')&' + f.name + '; }\n');
       }
-      if (!sigs.exists(f.sig)) {
+      if (f.args.indexOf("t") >= 0) {
+        b.add(dispatcherFor(f));
+      } else if (!sigs.exists(f.sig)) {
         sigs.set(f.sig, true);
         b.add(dispatcher(f.sig));
       }
@@ -165,6 +167,10 @@ class JitCodegen {
     return sig.split("(").join("").split(")").join("");
   }
 
+  public static function dispNameOf(name:String, sig:String):String {
+    return "rjit_dn_" + name + "_" + flat(sig);
+  }
+
   public static function dispName(sig:String):String {
     var p = sig.indexOf("(");
     if (p < 0) return "";
@@ -197,6 +203,34 @@ class JitCodegen {
     var body = "((" + fnty + ")f)(" + expr.join(", ") + ")";
     var call = ret == "v" ? body + "; return 0.0;" : "return " + retCast(ret) + body + ";";
     return 'extern "C" RJIT_API double ' + name + '(void* f, RJitArgs* a) { ' + call + ' }\n';
+  }
+
+  public static function dispatcherFor(f:JitFnInfo):String {
+    var types:Array<String> = [];
+    var expr:Array<String> = [];
+    var numSlot = 0;
+    var strSlot = 0;
+    for (i in 0...f.args.length) {
+      var c = f.args[i];
+      var raw = f.rawArgs != null && i < f.rawArgs.length ? StringTools.trim(f.rawArgs[i]) : null;
+      if (c == "t" && raw != null && raw != "") {
+        types.push(raw);
+        expr.push("*((" + raw + "*)(size_t)a->a[" + numSlot + "])");
+        numSlot++;
+      } else if (c == "s" || c == "S") {
+        types.push(cppType(c));
+        expr.push(argExpr(c, strSlot));
+        strSlot++;
+      } else {
+        types.push(cppType(c));
+        expr.push(argExpr(c, numSlot));
+        numSlot++;
+      }
+    }
+    var fnty = retType(f.ret) + "(*)(" + types.join(",") + ")";
+    var body = "((" + fnty + ")f)(" + expr.join(", ") + ")";
+    var call = f.ret == "v" ? body + "; return 0.0;" : "return " + retCast(f.ret) + body + ";";
+    return 'extern "C" RJIT_API double ' + dispNameOf(f.name, f.sig) + '(void* f, RJitArgs* a) { ' + call + ' }\n';
   }
 
   static function cppType(c:String):String {

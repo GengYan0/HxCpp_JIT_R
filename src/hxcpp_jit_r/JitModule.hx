@@ -65,27 +65,29 @@ class JitModule {
 
   public function warm():Void {
     if (handle == 0) return;
-    for (n in sigsOf.keys()) {
-      var list = sigsOf.get(n);
-      if (list == null) continue;
-      for (sg in list) {
-        dispOf(sg);
-        var k = n + "|" + sg;
-        if (!pre.exists(k)) {
-          var p = resolve("rjit_ptr_" + JitCodegen.ptrName(n, sg));
-          if (p != 0) pre.set(k, JitNative.toFloat(p));
-        }
-      }
+    for (k in bySig.keys()) {
+      var f = bySig.get(k);
+      if (f == null) continue;
+      dispFor(f);
+      ptrOf(f.name, f.sig);
+      if (f.ret != "S") continue;
+      var ks = "str|" + f.name + "|" + f.sig;
+      if (pre.exists(ks)) continue;
+      var p = resolve("rjit_str_" + JitCodegen.ptrName(f.name, f.sig));
+      if (p != 0) pre.set(ks, JitNative.toFloat(p));
     }
-    for (n in fns.keys()) {
-      fn(n);
-      var f = fns.get(n);
-      if (f == null || f.ret != "S") continue;
-      var k = "str|" + n + "|" + f.sig;
-      if (pre.exists(k)) continue;
-      var p = resolve("rjit_str_" + JitCodegen.ptrName(n, f.sig));
-      if (p != 0) pre.set(k, JitNative.toFloat(p));
-    }
+    for (n in fns.keys()) fn(n);
+  }
+
+  public function dispFor(f:JitFnInfo):cpp.SizeT {
+    if (f == null) return 0;
+    if (f.args.indexOf("t") < 0) return dispOf(f.sig);
+    var k = "dn|" + f.name + "|" + f.sig;
+    var v = pre.get(k);
+    if (v != null) return JitNative.toSizeT(v);
+    var d = resolve(JitCodegen.dispNameOf(f.name, f.sig));
+    if (d != 0) pre.set(k, JitNative.toFloat(d));
+    return d;
   }
 
   function dispOf(sg:String):cpp.SizeT {
@@ -119,8 +121,10 @@ class JitModule {
     structs = new Map();
     var texts = allSources();
     for (t in texts) for (s in JitScan.structs(t)) structs.set(s.name, s);
+    var allStructs = [];
+    for (t in texts) for (st in JitScan.structs(t)) allStructs.push(st);
     for (t in texts) {
-      for (f in JitScan.functions(t)) {
+      for (f in JitScan.functions(t, allStructs)) {
         if (!bySig.exists(f.name + "|" + f.sig)) bySig.set(f.name + "|" + f.sig, f);
         if (!fns.exists(f.name)) fns.set(f.name, f);
         var a = sigsOf.get(f.name);
@@ -565,7 +569,7 @@ class JitModule {
     var fp = ptrOf(n, f.sig);
     if (fp == 0) fp = resolve("rjit_ptr_" + n);
     if (fp == 0) return callA(n, args);
-    var d = dispOf(f.sig);
+    var d = dispFor(f);
     if (d == 0) return callA(n, args);
     calls++;
     var r = f.sig.indexOf("s") >= 0 || f.sig.indexOf("S") >= 0
@@ -635,7 +639,8 @@ class JitModule {
 
   public function callSig(n:String, sig:String, args:Array<Float>, ?strs:Array<String>):Float {
     if (handle == 0) return 0.0;
-    var d = dispOf(sig);
+    var fi = bySig.get(n + "|" + sig);
+    var d = fi == null ? dispOf(sig) : dispFor(fi);
     if (d == 0) return 0.0;
     var fp = ptrOf(n, sig);
     if (fp == 0) return 0.0;
@@ -685,8 +690,8 @@ class JitModule {
     var f = fns.get(n);
     var s = sig != null ? sig : (f == null ? null : f.sig);
     if (s == null || handle == 0) return new JitFn(this, n, "", 0, 0, 0, false, false);
-    var fp = resolve("rjit_ptr_" + JitCodegen.ptrName(n, s));
-    var d = resolve(JitCodegen.dispName(s));
+    var fp = ptrOf(n, s);
+    var d = f != null && f.sig == s ? dispFor(f) : resolve(JitCodegen.dispName(s));
     var needsStr = s.indexOf("s") >= 0 || s.indexOf("S") >= 0;
     return new JitFn(this, n, s, fp, d, ctx, needsStr, f != null && f.ret == "S");
   }

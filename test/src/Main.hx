@@ -599,6 +599,21 @@ const char* greeting() { return "hello"; }
     eq("pointer read string", new JitPtr(ps.callAuto("greeting", [])).readStr(), "hello");
     eq("string member missing is empty", ps.str("na.nosuch"), "");
 
+    head("struct by value");
+    var bv = Jit.compile("byvalue", '
+struct Vec2 { double x; double y; };
+Vec2 gv;
+void setv(double x, double y) { gv.x = x; gv.y = y; }
+double len2(Vec2 v) { return v.x + v.y; }
+double scale2(Vec2 v, double k) { return (v.x + v.y) * k; }
+');
+    ok("by value module compiles", bv.ok, bv.diag.length > 0 ? JitCompiler.describe(bv.diag[0]) : "");
+    bv.callAuto("setv", [3, 4]);
+    eq("by value single", Std.string(bv.callAuto("len2", [bv.get("&gv")])), "7");
+    eq("by value with scalar", Std.string(bv.callAuto("scale2", [bv.get("&gv"), 2])), "14");
+    eq("by value via explicit sig", Std.string(bv.callSig("len2", "d(t)", [bv.get("&gv")])), "7");
+    ok("by value bound handle", Std.string(bv.bind("len2").call(bv.get("&gv"))) == "7", "");
+
     head("expressions");
     var ex = Jit.compile("exprm", "
 double ax = 3; double ay = 4;

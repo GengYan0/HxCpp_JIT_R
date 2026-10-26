@@ -1,6 +1,6 @@
 # HxCpp_JIT_R
 
-Beta 0.0.14
+Beta 0.0.15
 
 Compile and call native C++ while your application is running. Hand it a source string, get a module back, call its functions like any Haxe method.
 
@@ -17,6 +17,7 @@ Behind the call the source goes into a cache directory, is compiled into a share
 - `std::string` results read back with `callStr`
 - Pointer variables: read, write, repoint, and `&name` for the address
 - Pointer and `const char*` members of structs, walked with `JitPtr` and decoded with `str()`
+- Struct parameters by value: pass the address, the generated dispatcher dereferences it
 - `const char*` results read straight back by `callStr`
 - Zero-compile reads and writes for globals, struct fields and array elements
 - Handles resolved once at load, so the call path never reaches the symbol table
@@ -351,6 +352,23 @@ A function that returns `const char*` is callable like any other and read throug
 m.callStr("label_of", [2]);
 ```
 
+Struct parameters by value are supported: pass the address and the dispatcher copies the value into the call.
+
+```haxe
+var m = Jit.compile("vec", '
+struct Vec2 { double x; double y; };
+Vec2 gv;
+void setv(double x, double y) { gv.x = x; gv.y = y; }
+double len2(Vec2 v) { return v.x + v.y; }
+');
+
+m.callAuto("setv", [3, 4]);
+m.callAuto("len2", [m.get("&gv")]);   // 7
+m.bind("len2").call(m.get("&gv"));    // 7
+```
+
+The signature shows the struct as `t`, so `m.callSig("len2", "d(t)", [addr])` also works. Struct results by value are not returned through the boundary; write into an out pointer instead.
+
 ### Expressions
 
 ```haxe
@@ -678,7 +696,7 @@ Time goes into compiler process startup and linking, not into the amount of code
 
 - Up to six numeric and four string arguments per call
 - Return values are numeric or `void`; pointers come back as addresses and `std::string` results go through `callStr`
-- Structs are passed by address, not by value
+- Struct parameters can be passed by value; struct results by value need a wrapper that writes to an out parameter
 - C++ default arguments are not filled in
 - Overloads resolve to the first match; use `callSig` for the others
 - Every guarded call costs an indirect jump; `callFast` removes the SEH guard but also removes crash containment
@@ -695,7 +713,7 @@ Time goes into compiler process startup and linking, not into the amount of code
 
 ## Testing
 
-`test/` is a standalone console project with 297 assertions.
+`test/` is a standalone console project with 302 assertions.
 
 ```
 cd test
@@ -703,7 +721,7 @@ haxe build.hxml
 bin/Main.exe
 ```
 
-Covers: core calls, diagnostic line numbers, expression offset, automatic signatures, string arguments, string and `RJIT_RETSTR` results, struct and array access, struct arrays and nested fields, pointer and string members, expressions, bound handles, overlapping signatures, multiple translation units and their globals, pointer variables and address-of, bulk transfer, session state including struct arrays, crash isolation and error callback, pointer handle, overload dispatch, concurrency gate, hot reload, file watch, large source, cache hit, cache packaging and import, compiler-less mode, manual mapping and unload, ELF header parsing, call throughput.
+Covers: core calls, diagnostic line numbers, expression offset, automatic signatures, string arguments, string and `RJIT_RETSTR` results, struct and array access, struct arrays and nested fields, pointer and string members, expressions, bound handles, overlapping signatures, struct parameters by value, multiple translation units and their globals, pointer variables and address-of, bulk transfer, session state including struct arrays, crash isolation and error callback, pointer handle, overload dispatch, concurrency gate, hot reload, file watch, large source, cache hit, cache packaging and import, compiler-less mode, manual mapping and unload, ELF header parsing, call throughput.
 
 Linux:
 

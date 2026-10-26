@@ -128,11 +128,13 @@ class JitCompiler {
     var cpp = dir + "/mod" + (isMsvcLike() ? ".cpp" : ".cc");
     var texts = [src];
     if (multi != null) for (t in multi.texts) texts.push(t);
+    var structsAll = [];
+    for (t in texts) for (s in JitScan.structs(t)) structsAll.push(s);
     var fns = [];
     var seen = new Map<String, Bool>();
     var externs:Array<String> = [];
     for (i in 0...texts.length) {
-      for (f in JitScan.functions(texts[i])) {
+      for (f in JitScan.functions(texts[i], structsAll)) {
         var k = f.name + "|" + f.sig;
         if (seen.exists(k)) continue;
         seen.set(k, true);
@@ -140,8 +142,6 @@ class JitCompiler {
         if (i > 0 && !f.isStatic) externs.push(declOf(f));
       }
     }
-    var structsAll = [];
-    for (t in texts) for (s in JitScan.structs(t)) structsAll.push(s);
     var vars = JitScan.globals(src);
     var mainStructs = new Map<String, Bool>();
     for (x in JitScan.structs(src)) mainStructs.set(x.name, true);

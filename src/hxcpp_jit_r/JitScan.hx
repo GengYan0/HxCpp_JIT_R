@@ -173,9 +173,11 @@ class JitScan {
     return out;
   }
 
-  public static function functions(src:String):Array<JitFnInfo> {
+  public static function functions(src:String, structs:Array<JitStructInfo> = null):Array<JitFnInfo> {
     var clean = strip(src);
     var kw = keywords();
+    var sts = new Map<String, Bool>();
+    if (structs != null) for (st in structs) sts.set(st.name, true);
     var out:Array<JitFnInfo> = [];
     var lines = clean.split("\n");
     for (li in 0...lines.length) {
@@ -207,6 +209,7 @@ class JitScan {
       var strArgs = 0;
       for (t in rawArgs) {
         var c = code(t);
+        if (c == "?" && sts.exists(StringTools.trim(t))) c = "t";
         if (c == "?") {
           ok = false;
           break;
