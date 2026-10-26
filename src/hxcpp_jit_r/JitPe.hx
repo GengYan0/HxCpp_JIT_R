@@ -1,0 +1,465 @@
+package hxcpp_jit_r;
+
+import sys.FileSystem;
+import sys.io.File;
+
+typedef PeSection = {
+  var name:String;
+  var va:Int;
+  var vsize:Int;
+  var raw:Int;
+  var rawSize:Int;
+  var chars:Int;
+}
+
+typedef PeDir = {
+  var rva:Int;
+  var size:Int;
+}
+
+class PeImage {
+  public var path:String = "";
+  public var base:cpp.SizeT = 0;
+  public var imageBase:Float = 0;
+  public var sizeOfImage:Int = 0;
+  public var sizeOfHeaders:Int = 0;
+  public var entry:Int = 0;
+  public var pe32plus:Bool = true;
+  public var dirs:Array<PeDir> = [];
+  public var sections:Array<PeSection> = [];
+  public var exports:Map<String, Int> = new Map();
+  public var forwarders:Map<String, String> = new Map();
+  public var imports:Array<String> = [];
+  public var tlsIndex:Int = -1;
+  public var tlsStart:cpp.SizeT = 0;
+  public var tlsEnd:cpp.SizeT = 0;
+  public var tlsZero:Int = 0;
+  public var relocCount:Int = 0;
+  public var rebased:Bool = false;
+  public var ok:Bool = false;
+  public var error:String = "";
+  public var manual:Bool = false;
+  public var handle:cpp.SizeT = 0;
+
+  public function new() {}
+
+  public function summary():String {
+    if (!ok) return "pe " + path + " FAILED: " + error;
+    return 'pe $path base=0x${StringTools.hex(Std.int(base), 0)} image=${sizeOfImage}B sections=${sections.length} exports=${Lambda.count(exports)} imports=${imports.length} reloc=$relocCount rebased=$rebased manual=$manual';
+  }
+}
+
+class JitPe {
+  public static var verbose:Bool = false;
+  public static var allowEntryFail:Bool = true;
+  public static var skipEntry:Bool = false;
+  public static var lastEntryFault:Int = 0;
+  static var images:Map<String, PeImage> = new Map();
+
+  static inline function at(base:cpp.SizeT, off:Int):cpp.SizeT {
+    return JitNative.toSizeT(JitNative.toFloat(base) + off);
+  }
+
+  static function ptrOf(b:haxe.io.Bytes):cpp.SizeT {
+    return untyped __cpp__("(size_t){0}->b->Pointer()", b);
+  }
+
+  static inline function u32(v:Int):Float {
+    return v >= 0 ? v * 1.0 : v + 4294967296.0;
+  }
+
+  static function readStr(base:cpp.SizeT, rva:Int, max:Int = 512):String {
+    var b = new StringBuf();
+    var i = 0;
+    while (i < max) {
+      var c = Std.int(JitNative.peek(at(base, rva + i), 1));
+      if (c == 0) break;
+      b.addChar(c);
+      i++;
+    }
+    return b.toString();
+  }
+
+  public static function parse(path:String):PeImage {
+    var img = new PeImage();
+    img.path = JitCache.normalize(path);
+    if (!FileSystem.exists(path)) {
+      img.error = "file not found";
+      return img;
+    }
+    var b:haxe.io.Bytes = null;
+    try {
+      b = File.getBytes(path);
+    } catch (e:Dynamic) {
+      img.error = "read failed: " + Std.string(e);
+      return img;
+    }
+    if (b.length < 0x40) {
+      img.error = "too small";
+      return img;
+    }
+    if (b.getUInt16(0) != 0x5A4D) {
+      img.error = "missing MZ";
+      return img;
+    }
+    var nt = b.getInt32(0x3C);
+    if (nt <= 0 || nt + 24 > b.length) {
+      img.error = "bad e_lfanew";
+      return img;
+    }
+    if (b.getInt32(nt) != 0x00004550) {
+      img.error = "missing PE signature";
+      return img;
+    }
+    var fh = nt + 4;
+    var numSec = b.getUInt16(fh + 2);
+    var sizeOpt = b.getUInt16(fh + 16);
+    var opt = fh + 20;
+    if (opt + sizeOpt > b.length) {
+      img.error = "truncated optional header";
+      return img;
+    }
+    var magic = b.getUInt16(opt);
+    if (magic != 0x20B && magic != 0x10B) {
+      img.error = "unsupported magic " + StringTools.hex(magic, 4);
+      return img;
+    }
+    img.pe32plus = magic == 0x20B;
+    img.entry = b.getInt32(opt + 16);
+    if (img.pe32plus) {
+      img.imageBase = u32(b.getInt32(opt + 28)) * 4294967296.0 + u32(b.getInt32(opt + 24));
+    } else {
+      img.imageBase = u32(b.getInt32(opt + 28));
+    }
+    img.sizeOfImage = b.getInt32(opt + 56);
+    img.sizeOfHeaders = b.getInt32(opt + 60);
+    var ddOff = opt + (img.pe32plus ? 112 : 96);
+    var ddCount = b.getInt32(opt + (img.pe32plus ? 108 : 92));
+    if (ddCount < 0) ddCount = 0;
+    if (ddCount > 16) ddCount = 16;
+    for (i in 0...16) {
+      if (i < ddCount && ddOff + i * 8 + 8 <= b.length) {
+        img.dirs.push({rva: b.getInt32(ddOff + i * 8), size: b.getInt32(ddOff + i * 8 + 4)});
+      } else {
+        img.dirs.push({rva: 0, size: 0});
+      }
+    }
+    var secOff = opt + sizeOpt;
+    for (i in 0...numSec) {
+      var s = secOff + i * 40;
+      if (s + 40 > b.length) break;
+      var rawName = b.getString(s, 8);
+      var z = rawName.indexOf("\x00");
+      var nm = z >= 0 ? rawName.substr(0, z) : rawName;
+      img.sections.push({
+        name: nm,
+        vsize: b.getInt32(s + 8),
+        va: b.getInt32(s + 12),
+        rawSize: b.getInt32(s + 16),
+        raw: b.getInt32(s + 20),
+        chars: b.getInt32(s + 36)
+      });
+    }
+    if (img.sizeOfImage <= 0) {
+      img.error = "bad SizeOfImage";
+      return img;
+    }
+    img.ok = true;
+    return img;
+  }
+
+  public static function load(path:String):PeImage {
+    var img = parse(path);
+    if (!img.ok) return img;
+    var bytes = File.getBytes(path);
+    var src = ptrOf(bytes);
+    var want = img.imageBase > 0 && img.imageBase < 4294967296.0 * 8192 ? JitNative.toSizeT(img.imageBase) : 0;
+    var base = JitNative.valloc(want, img.sizeOfImage);
+    if (base == 0 && want != 0) base = JitNative.valloc(0, img.sizeOfImage);
+    if (base == 0) {
+      img.ok = false;
+      img.error = "VirtualAlloc failed for " + img.sizeOfImage + " bytes";
+      return img;
+    }
+    img.base = base;
+    if (verbose) Sys.println("[pe] alloc base=0x" + StringTools.hex(Std.int(JitNative.toFloat(base)), 0) + " want=0x" + StringTools.hex(Std.int(img.imageBase), 0) + " size=" + img.sizeOfImage);
+    var delta = JitNative.toFloat(base) - img.imageBase;
+    img.rebased = delta != 0;
+
+    var hdr = img.sizeOfHeaders;
+    if (hdr > bytes.length) hdr = bytes.length;
+    if (hdr > 0) JitNative.memcpyRaw(base, src, hdr);
+
+    for (s in img.sections) {
+      if (s.raw <= 0 || s.rawSize <= 0) continue;
+      var len = s.rawSize;
+      if (s.vsize > 0 && len > s.vsize) len = s.vsize;
+      if (s.raw + len > bytes.length) len = bytes.length - s.raw;
+      if (len <= 0) continue;
+      if (s.va + len > img.sizeOfImage) continue;
+      JitNative.memcpyRaw(at(base, s.va), JitNative.toSizeT(JitNative.toFloat(src) + s.raw), len);
+    }
+
+    if (verbose) Sys.println("[pe] sections copied");
+    if (img.rebased && !applyRelocs(img, delta)) {
+      img.ok = false;
+      img.error = "image needs rebasing but has no usable relocation table";
+      JitNative.vfree(base, img.sizeOfImage);
+      img.base = 0;
+      return img;
+    }
+
+    if (verbose) Sys.println("[pe] reloc done n=" + img.relocCount);
+    if (!resolveImports(img)) {
+      JitNative.vfree(base, img.sizeOfImage);
+      img.base = 0;
+      return img;
+    }
+
+    if (verbose) Sys.println("[pe] imports done " + img.imports.join(","));
+    setupTls(img);
+    if (verbose) Sys.println("[pe] tls idx=" + img.tlsIndex);
+    parseExports(img);
+    if (verbose) Sys.println("[pe] exports=" + Lambda.count(img.exports) + " fwd=" + Lambda.count(img.forwarders));
+    registerUnwind(img);
+    JitNative.flushIcache(base, img.sizeOfImage);
+    if (verbose) Sys.println("[pe] calling entry 0x" + StringTools.hex(img.entry, 0));
+
+    if (img.entry != 0 && !skipEntry) {
+      lastEntryFault = 0;
+      var rc = JitNative.callEntry(at(base, img.entry), base, 1, 0);
+      if (verbose) Sys.println("[pe] entry rc=" + rc + " fault=0x" + StringTools.hex(lastEntryFault, 8));
+      if (rc == 0 && !allowEntryFail) {
+        img.ok = false;
+        img.error = "DllMain returned FALSE";
+        teardownTls(img);
+        JitNative.vfree(base, img.sizeOfImage);
+        img.base = 0;
+        return img;
+      }
+      if (rc == -1) img.error = "DllMain faulted 0x" + StringTools.hex(lastEntryFault, 8);
+    }
+    img.manual = true;
+    images.set(Std.string(base), img);
+    if (verbose) Sys.println("[pe] " + img.summary());
+    return img;
+  }
+
+  static function applyRelocs(img:PeImage, delta:Float):Bool {
+    var d = img.dirs[5];
+    if (d.rva == 0 || d.size == 0) return false;
+    var base = img.base;
+    var p = 0;
+    var n = 0;
+    while (p < d.size) {
+      var va = Std.int(JitNative.peek(at(base, d.rva + p), 4));
+      var blockSize = Std.int(JitNative.peek(at(base, d.rva + p + 4), 4));
+      if (blockSize < 8 || va == 0 && blockSize <= 8) break;
+      var cnt = Std.int((blockSize - 8) / 2);
+      for (i in 0...cnt) {
+        var e = Std.int(JitNative.peek(at(base, d.rva + p + 8 + i * 2), 2));
+        var ty = e >> 12;
+        var off = e & 0x0FFF;
+        if (ty == 0) continue;
+        JitNative.addRel(at(base, va + off), delta, ty);
+        n++;
+      }
+      p += blockSize;
+    }
+    img.relocCount = n;
+    return n > 0;
+  }
+
+  static function resolveImports(img:PeImage):Bool {
+    var d = img.dirs[1];
+    if (d.rva == 0) return true;
+    var base = img.base;
+    var ps = img.pe32plus ? 8 : 4;
+    var p = 0;
+    var guard = 0;
+    while (guard++ < 4096) {
+      var off = d.rva + p;
+      var origThunk = Std.int(JitNative.peek(at(base, off), 4));
+      var nameRva = Std.int(JitNative.peek(at(base, off + 12), 4));
+      var firstThunk = Std.int(JitNative.peek(at(base, off + 16), 4));
+      if (origThunk == 0 && nameRva == 0 && firstThunk == 0) break;
+      if (nameRva == 0 || firstThunk == 0) {
+        p += 20;
+        continue;
+      }
+      var dll = readStr(base, nameRva);
+      var h = JitNative.loadLibA(dll);
+      if (h == 0) {
+        img.ok = false;
+        img.error = "import dll not loadable: " + dll;
+        return false;
+      }
+      img.imports.push(dll);
+      var thunkRva = origThunk != 0 ? origThunk : firstThunk;
+      var i = 0;
+      while (i < 65536) {
+        var slot = at(base, thunkRva + i * ps);
+        var addr:cpp.SizeT = 0;
+        if (img.pe32plus) {
+          var v = JitNative.peek(slot, 8);
+          if (v == 0) break;
+          if (v >= 9223372036854775808.0) {
+            addr = JitNative.getProcOrd(h, Std.int(v - 9223372036854775808.0));
+          } else {
+            addr = JitNative.getProcAt(h, at(base, Std.int(v) + 2));
+          }
+        } else {
+          var v = JitNative.peek(slot, 4);
+          if (v == 0) break;
+          if (v >= 2147483648.0) {
+            addr = JitNative.getProcOrd(h, Std.int(v - 2147483648.0));
+          } else {
+            addr = JitNative.getProcAt(h, at(base, Std.int(v) + 2));
+          }
+        }
+        if (addr == 0) {
+          img.ok = false;
+          img.error = "unresolved import in " + dll + " slot " + i;
+          return false;
+        }
+        JitNative.poke(at(base, firstThunk + i * ps), ps, JitNative.toFloat(addr));
+        i++;
+      }
+      p += 20;
+    }
+    return true;
+  }
+
+  static function setupTls(img:PeImage):Void {
+    var d = img.dirs[9];
+    if (d.rva == 0 || d.size < 24) return;
+    var base = img.base;
+    var idxVa = img.pe32plus
+      ? JitNative.peek(at(base, d.rva + 16), 8)
+      : JitNative.peek(at(base, d.rva + 12), 4);
+    var cbVa = img.pe32plus
+      ? JitNative.peek(at(base, d.rva + 24), 8)
+      : JitNative.peek(at(base, d.rva + 16), 4);
+    var startVa = img.pe32plus
+      ? JitNative.peek(at(base, d.rva), 8)
+      : JitNative.peek(at(base, d.rva), 4);
+    var endVa = img.pe32plus
+      ? JitNative.peek(at(base, d.rva + 8), 8)
+      : JitNative.peek(at(base, d.rva + 4), 4);
+    var zeroFill = Std.int(JitNative.peek(at(base, d.rva + (img.pe32plus ? 32 : 20)), 4));
+    img.tlsStart = JitNative.toSizeT(startVa);
+    img.tlsEnd = JitNative.toSizeT(endVa);
+    img.tlsZero = zeroFill;
+    if (idxVa != 0) {
+      var idx = JitNative.setupTls(JitNative.toSizeT(idxVa), img.tlsStart, img.tlsEnd, zeroFill);
+      img.tlsIndex = idx;
+    }
+    if (cbVa != 0) {
+      var ps = img.pe32plus ? 8 : 4;
+      var i = 0;
+      while (i < 64) {
+        var f = JitNative.peek(at(JitNative.toSizeT(cbVa), i * ps), ps);
+        if (f == 0) break;
+        JitNative.callEntry(JitNative.toSizeT(f), base, 1, 0);
+        i++;
+      }
+    }
+  }
+
+  static function teardownTls(img:PeImage):Void {
+    if (img.tlsIndex >= 0) {
+      JitNative.clearTls(img.tlsIndex);
+      img.tlsIndex = -1;
+    }
+  }
+
+  static function parseExports(img:PeImage):Void {
+    var d = img.dirs[0];
+    if (d.rva == 0 || d.size == 0) return;
+    var base = img.base;
+    var nNames = Std.int(JitNative.peek(at(base, d.rva + 24), 4));
+    var addrFuncs = Std.int(JitNative.peek(at(base, d.rva + 28), 4));
+    var addrNames = Std.int(JitNative.peek(at(base, d.rva + 32), 4));
+    var addrOrds = Std.int(JitNative.peek(at(base, d.rva + 36), 4));
+    if (nNames <= 0 || nNames > 65536 || addrNames == 0 || addrFuncs == 0 || addrOrds == 0) return;
+    for (i in 0...nNames) {
+      var nameRva = Std.int(JitNative.peek(at(base, addrNames + i * 4), 4));
+      var ord = Std.int(JitNative.peek(at(base, addrOrds + i * 2), 2));
+      var fnRva = Std.int(JitNative.peek(at(base, addrFuncs + ord * 4), 4));
+      if (nameRva == 0 || fnRva == 0) continue;
+      var nm = readStr(base, nameRva, 256);
+      if (nm == "") continue;
+      if (fnRva >= d.rva && fnRva < d.rva + d.size) {
+        var fwd = readStr(base, fnRva, 256);
+        if (fwd != "") img.forwarders.set(nm, fwd);
+      } else {
+        img.exports.set(nm, fnRva);
+      }
+    }
+  }
+
+  static function registerUnwind(img:PeImage):Void {
+    var d = img.dirs[3];
+    if (d.rva == 0 || d.size < 12) return;
+    var first = Std.int(JitNative.peek(at(img.base, d.rva), 4));
+    if (first == 0) return;
+    JitNative.addFnTable(at(img.base, d.rva), Std.int(d.size / 12), img.base);
+  }
+
+  public static function proc(img:PeImage, name:String):cpp.SizeT {
+    if (img == null) return 0;
+    if (!img.manual) {
+      if (img.handle == 0) return 0;
+      return JitNative.getProc(img.handle, name);
+    }
+    var rva = img.exports.get(name);
+    if (rva != null) return at(img.base, rva);
+    var fwd = img.forwarders.get(name);
+    if (fwd != null) {
+      var dot = fwd.lastIndexOf(".");
+      if (dot <= 0) return 0;
+      var dll = fwd.substr(0, dot);
+      var fn = fwd.substr(dot + 1);
+      if (dll.indexOf(".") < 0) dll = dll + ".dll";
+      var h = JitNative.loadLibA(dll);
+      if (h == 0) return 0;
+      return JitNative.getProc(h, fn);
+    }
+    return 0;
+  }
+
+  public static function find(base:cpp.SizeT):PeImage {
+    return images.get(Std.string(base));
+  }
+
+  public static function unload(img:PeImage):Bool {
+    if (img == null || !img.ok) return false;
+    if (!img.manual) {
+      if (img.handle != 0) JitNative.unloadDll(img.handle);
+      img.handle = 0;
+      img.ok = false;
+      return true;
+    }
+    if (img.entry != 0) JitNative.callEntry(at(img.base, img.entry), img.base, 0, 0);
+    teardownTls(img);
+    images.remove(Std.string(img.base));
+    JitNative.vfree(img.base, img.sizeOfImage);
+    img.base = 0;
+    img.ok = false;
+    return true;
+  }
+
+  public static function bindThread():Int {
+    var n = 0;
+    for (k in images.keys()) {
+      var img = images.get(k);
+      if (img == null || img.tlsIndex < 0) continue;
+      if (JitNative.bindTlsBlock(img.tlsIndex, img.tlsStart, img.tlsEnd, img.tlsZero) != 0) n++;
+    }
+    return n;
+  }
+
+  public static function count():Int {
+    return Lambda.count(images);
+  }
+}

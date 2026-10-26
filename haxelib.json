@@ -1,0 +1,12 @@
+{
+  "name": "hxcpp_jit_r",
+  "url": "https://github.com/GengYan0/hxcpp_jit_r",
+  "license": "MIT",
+  "tags": ["cpp", "jit", "native", "windows", "msvc", "runtime", "hot-reload"],
+  "description": "Compile and execute native C++ at runtime inside hxcpp applications, with automatic signatures, string arguments, struct and array access, hot reload, crash isolation and manual PE loading.",
+  "version": "1.0.0",
+  "classPath": "src",
+  "releasenote": "initial release",
+  "contributors": ["GengYan0"],
+  "dependencies": {}
+}

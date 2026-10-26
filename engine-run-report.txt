@@ -1,0 +1,24 @@
+[jit] ready=true builds=0 cacheHits=0 modules=0
+  backend=msvc exe=cl.exe arch=x64 origin=detected Files (x86)/Microsoft Visual Studio/2019/Community
+  cache=F:\1.0.4\export\release\windows\bin\userdata\jitcache size=2KB
+[jit] selftest
+  PASS add(2,3) = 5
+  PASS mul(6,7) = 42
+  PASS mix(6,7) via host callback = 43
+  PASS greet() retstr = native-string
+  PASS fib(30) = 832040
+  PASS undefined(), safe no-op = 0
+  PASS host log captured = true
+  ...  cross-ABI call overhead 0.135us  (200000x sum(100) = 990000000)
+  ...  build 868ms  cached=false  dll=userdata/jitcache/3E66B7ED274E08BF/mod.dll
+[jit] result PASS (7/7)
+[jit] auto ok=true diag=0
+[jit] half(10)=5 sig=d(d)
+[jit] slen(cstr)=5 sig=i(s)
+[jit] scat(S,S)=5 sig=i(SS)
+[jit] cnt=2
+[jit] cnt set=50
+[jit] p.x=2.5 arr[1]=7
+[jit] manual ok=true mapped=true sq(9)=81
+[jit] pe sections=6 reloc=0 rebased=false imports=KERNEL32.dll
+[jit] manual unloaded images=0

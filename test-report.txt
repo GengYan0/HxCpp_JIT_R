@@ -1,0 +1,517 @@
+[jit] backend=msvc exe=cl.exe arch=x64 origin=vs-install
+  PASS setup ready  2ms
+
+== backend fallback ==
+  PASS request clang  resolved backend=msvc
+  PASS request msvc  resolved backend=msvc
+
+== core ==
+[jit] core ok (cached) [add,mul,mix,greet,fib,cpponly]
+  PASS compile  cached
+  PASS add
+  PASS mul
+  PASS host callback
+[jit] hello
+  PASS retstr
+  PASS host log
+  PASS fib(30)
+  PASS undefined fn
+  PASS address  0x21000
+  PASS symbols
+
+== diagnostics line accuracy ==
+  PASS bad compile fails
+  PASS diag count  1 entries
+  PASS diag line == 3
+
+== eval offset ==
+[jit] eval_0DFC9D48 ok (cached) [__e]
+  PASS eval value
+  PASS eval diag line == 2
+
+== session ==
+[jit] sess ok (385ms) [a]
+  PASS session eval 1
+  PASS session a
+[jit] sess ok (391ms) [a,b]
+  PASS session eval 2
+  PASS session b sees a
+[jit] sess ok (361ms) [a,b,c]
+  PASS session eval 3
+  PASS session var bridge
+[jit] sess ok (361ms) [a]
+  PASS session redeclare
+  PASS session a redeclared
+
+== parallel compile gate ==
+[jit] par1 ok (async 495ms)
+[jit] par2 ok (async 493ms)
+[jit] par0 ok (async 547ms)
+[jit] par5 ok (async 659ms)
+[jit] par3 ok (async 754ms)
+[jit] par4 ok (async 756ms)
+[jit] par6 ok (async 659ms)
+[jit] par7 ok (async 594ms)
+[jit] par8 ok (async 597ms)
+  PASS all jobs finished  9/9
+  PASS peak <= maxParallel  peak=3
+  PASS peak >= 2  peak=3
+  PASS module registered  mods=12 names=par1,par2,par3,sess,par4,eval_0DFC9D48,par5,par6,par7,par8,core,par0
+  PASS par result
+
+== hot reload stress ==
+[jit] hotstress ok (cached) [v]
+[jit] hotstress ok (507ms) [v]
+[jit] hotstress ok (537ms) [v]
+[jit] hotstress ok (577ms) [v]
+[jit] hotstress ok (465ms) [v]
+[jit] hotstress ok (503ms) [v]
+[jit] hotstress ok (569ms) [v]
+[jit] hotstress ok (502ms) [v]
+[jit] hotstress ok (571ms) [v]
+  PASS reload final value
+  PASS modules alive  13 modules
+
+== large source ==
+[jit] big ok (cached) [f0,f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13,f14,f15,f16,f17,f18,f19,f20,f21,f22,f23,f24,f25,f26,f27,f28,f29,f30,f31,f32,f33,f34,f35,f36,f37,f38,f39,f40,f41,f42,f43,f44,f45,f46,f47,f48,f49,f50,f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65,f66,f67,f68,f69,f70,f71,f72,f73,f74,f75,f76,f77,f78,f79,f80,f81,f82,f83,f84,f85,f86,f87,f88,f89,f90,f91,f92,f93,f94,f95,f96,f97,f98,f99,f100,f101,f102,f103,f104,f105,f106,f107,f108,f109,f110,f111,f112,f113,f114,f115,f116,f117,f118,f119,f120,f121,f122,f123,f124,f125,f126,f127,f128,f129,f130,f131,f132,f133,f134,f135,f136,f137,f138,f139,f140,f141,f142,f143,f144,f145,f146,f147,f148,f149,f150,f151,f152,f153,f154,f155,f156,f157,f158,f159,f160,f161,f162,f163,f164,f165,f166,f167,f168,f169,f170,f171,f172,f173,f174,f175,f176,f177,f178,f179,f180,f181,f182,f183,f184,f185,f186,f187,f188,f189,f190,f191,f192,f193,f194,f195,f196,f197,f198,f199]
+  PASS 200 functions compile  0ms, 200 symbols
+  PASS f199(2)
+
+== cache ==
+[jit] cachedemo ok (cached) [v]
+[jit] cachedemo ok (cached) [v]
+  PASS second is cached
+  PASS cached value
+
+== auto signature ==
+  PASS scanner in cpp  found=1 sig=d(d)
+  PASS scanner vars in cpp  found=1
+[jit] auto ok (cached)
+  PASS auto compile  0ms  sigs=d(d) i(ii) v() d(id)  
+  PASS half(10)
+  PASS addi(3,4)
+  PASS mixd(2,0.5)
+  PASS twice(21)
+  PASS halfF(5) float ret/arg
+  PASS isPos(1) bool ret
+  PASS isPos(-1) bool ret
+  PASS bumpc(65) char ret
+  PASS twiceU(7) unsigned
+  PASS sig halfF
+  PASS sig isPos
+  PASS explicit sig call  4.5
+  PASS missing sig rejected
+  PASS hasSig
+  PASS var counter init
+  PASS var after bump
+  PASS setVar
+  PASS var after set+bump
+  PASS const var exposed  3.14159
+  PASS unknown var rejected
+
+== session state across evals ==
+[jit] state ok (529ms)
+  PASS state eval 1
+  PASS heal(5)
+[jit] state ok (568ms)
+  PASS state eval 2
+  PASS hp survived recompile
+  PASS dmg(3)
+  PASS hp after dmg
+[jit] state ok (630ms)
+  PASS state eval 3
+  PASS bonus(2) sees hp
+
+== crash guard ==
+[jit] crash ok (cached)
+  PASS crash module compiled
+  PASS crash returns 0
+  PASS onError fired
+
+== pointer handle ==
+  PASS fn ptr not null  JitPtr(0x0000C4521030)
+  PASS ptr format
+  PASS null ptr
+
+== overload ==
+[jit] over ok (cached)
+  PASS overload compiled
+  PASS overload sig count
+  PASS overload int
+  PASS overload double
+
+== scanner struct/array ==
+  PASS struct parsed  A/2
+  PASS array parsed  array:d:5
+  PASS struct var parsed  struct:P
+
+== posix backend args ==
+  PASS posix -shared  -shared -fPIC -O2 -std=c++17 -DNDEBUG -DRJIT_DEFINE_ABI_EXPORT -fvisibility=hidden -include /c/h.h -I/c -I/d m.cc -o m.so -Wl,-undefined,dynamic_lookup
+  PASS posix -fPIC
+  PASS posix -std
+  PASS posix opt
+  PASS posix -include header
+  PASS posix visibility
+  PASS posix Od to O0
+
+== string args ==
+  PASS needsStringHeader
+  PASS no header needed
+[jit] strs ok (1020ms)
+  PASS string compile
+  PASS sig lens
+  PASS sig adds
+  PASS lens hello
+  PASS lens cn utf8
+  PASS mixs int+str
+  PASS adds two strings
+  PASS first char
+  PASS empty string len
+  PASS missing str arg
+
+== struct and array access ==
+[jit] agg ok (cached)
+  PASS agg compile
+  PASS kind pos  struct
+  PASS fields pos  x,y
+  PASS get pos.x init
+  PASS set pos.x
+  PASS get pos.x
+  PASS set pos.y
+  PASS get pos.y
+  PASS set hero.hp
+  PASS get hero.hp
+  PASS set hero.spd
+  PASS get hero.spd
+  PASS arr size
+  PASS set arr[2]
+  PASS get arr[2]
+  PASS arr oob returns 0
+  PASS set ids[0]
+  PASS get ids[0]
+  PASS dbg ids getIndex0
+  PASS dbg ids setIndex1
+  PASS dbg ids getIndex1
+  PASS unknown field nan
+
+== aggregate state across eval ==
+[jit] aggstate ok (488ms)
+  PASS agg eval 1
+  PASS agg session x
+[jit] aggstate ok (475ms)
+  PASS agg eval 2
+  PASS agg survived recompile
+
+== manual pe loader ==
+[jit] man ok (cached)
+  PASS manual compile+load
+  PASS manual mapped  sections=6 imports=KERNEL32.dll reloc=0 rebased=false
+  PASS manual sq(7)
+  PASS manual add3
+[jit] man2 ok (cached)
+  PASS manual second module
+  PASS manual tri
+  PASS manual unloaded  base=6442450944 images=0
+[jit] loadlib ok (cached)
+  PASS loadlib still works
+
+== pack export / import ==
+[jit] aggstate ok (cached)
+[jit] big ok (cached) [f0,f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13,f14,f15,f16,f17,f18,f19,f20,f21,f22,f23,f24,f25,f26,f27,f28,f29,f30,f31,f32,f33,f34,f35,f36,f37,f38,f39,f40,f41,f42,f43,f44,f45,f46,f47,f48,f49,f50,f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65,f66,f67,f68,f69,f70,f71,f72,f73,f74,f75,f76,f77,f78,f79,f80,f81,f82,f83,f84,f85,f86,f87,f88,f89,f90,f91,f92,f93,f94,f95,f96,f97,f98,f99,f100,f101,f102,f103,f104,f105,f106,f107,f108,f109,f110,f111,f112,f113,f114,f115,f116,f117,f118,f119,f120,f121,f122,f123,f124,f125,f126,f127,f128,f129,f130,f131,f132,f133,f134,f135,f136,f137,f138,f139,f140,f141,f142,f143,f144,f145,f146,f147,f148,f149,f150,f151,f152,f153,f154,f155,f156,f157,f158,f159,f160,f161,f162,f163,f164,f165,f166,f167,f168,f169,f170,f171,f172,f173,f174,f175,f176,f177,f178,f179,f180,f181,f182,f183,f184,f185,f186,f187,f188,f189,f190,f191,f192,f193,f194,f195,f196,f197,f198,f199]
+[jit] par1 ok (cached) [v]
+[jit] agg ok (cached)
+[jit] state ok (cached)
+[jit] hotstress ok (cached) [v]
+[jit] par2 ok (cached) [v]
+[jit] strs ok (cached)
+[jit] par3 ok (cached) [v]
+[jit] sess ok (cached) [a]
+[jit] par4 ok (cached) [v]
+[jit] eval_0DFC9D48 ok (cached) [__e]
+[jit] over ok (cached)
+[jit] par5 ok (cached) [v]
+[jit] cachedemo ok (cached) [v]
+[jit] par6 ok (cached) [v]
+[jit] par7 ok (cached) [v]
+[jit] crash ok (cached)
+[jit] par8 ok (cached) [v]
+[jit] loadlib ok (cached)
+[jit] par0 ok (cached) [v]
+[jit] core ok (cached) [add,mul,mix,greet,fib,cpponly]
+[jit] auto ok (cached)
+  PASS export files  565 files
+  PASS pack manifest ok  pack ok: abi=5 codegen=6 platform=windows-x64 modules=406 bytes=37225472
+  PASS manifest exists
+  PASS headline dll packed
+
+== cache-only mode (no toolchain) ==
+[jit] cold ok (cached)
+  PASS cold compile
+[jit] aggstate ok (cached)
+[jit] big ok (cached) [f0,f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13,f14,f15,f16,f17,f18,f19,f20,f21,f22,f23,f24,f25,f26,f27,f28,f29,f30,f31,f32,f33,f34,f35,f36,f37,f38,f39,f40,f41,f42,f43,f44,f45,f46,f47,f48,f49,f50,f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65,f66,f67,f68,f69,f70,f71,f72,f73,f74,f75,f76,f77,f78,f79,f80,f81,f82,f83,f84,f85,f86,f87,f88,f89,f90,f91,f92,f93,f94,f95,f96,f97,f98,f99,f100,f101,f102,f103,f104,f105,f106,f107,f108,f109,f110,f111,f112,f113,f114,f115,f116,f117,f118,f119,f120,f121,f122,f123,f124,f125,f126,f127,f128,f129,f130,f131,f132,f133,f134,f135,f136,f137,f138,f139,f140,f141,f142,f143,f144,f145,f146,f147,f148,f149,f150,f151,f152,f153,f154,f155,f156,f157,f158,f159,f160,f161,f162,f163,f164,f165,f166,f167,f168,f169,f170,f171,f172,f173,f174,f175,f176,f177,f178,f179,f180,f181,f182,f183,f184,f185,f186,f187,f188,f189,f190,f191,f192,f193,f194,f195,f196,f197,f198,f199]
+[jit] par1 ok (cached) [v]
+[jit] agg ok (cached)
+[jit] state ok (cached)
+[jit] hotstress ok (cached) [v]
+[jit] par2 ok (cached) [v]
+[jit] strs ok (cached)
+[jit] par3 ok (cached) [v]
+[jit] sess ok (cached) [a]
+[jit] par4 ok (cached) [v]
+[jit] eval_0DFC9D48 ok (cached) [__e]
+[jit] cold ok (cached)
+[jit] over ok (cached)
+[jit] par5 ok (cached) [v]
+[jit] cachedemo ok (cached) [v]
+[jit] par6 ok (cached) [v]
+[jit] par7 ok (cached) [v]
+[jit] crash ok (cached)
+[jit] par8 ok (cached) [v]
+[jit] loadlib ok (cached)
+[jit] par0 ok (cached) [v]
+[jit] core ok (cached) [add,mul,mix,greet,fib,cpponly]
+[jit] auto ok (cached)
+[jit] toolchain disabled by forceUnavailable (cache-only mode)
+  PASS toolchain disabled  toolchain disabled by forceUnavailable
+  PASS no cache yet fails  jit: error E_TOOLCHAIN toolchain disabled by forceUnavailable
+  PASS import files  565 files
+[jit] cold ok (cached, no toolchain)
+  PASS cache-only hit  cached=true
+  PASS cache-only call
+[jit] backend=msvc exe=cl.exe arch=x64 origin=environment
+  PASS toolchain restored
+
+== throughput ==
+[jit] perf ok (cached) [mix]
+  PASS 500k calls  0.042us/call  acc=14000000
+
+== stability ==
+  PASS no broken modules  0 broken
+[jit] backend probe
+  backend=msvc exe=cl.exe arch=x64 origin=vs-install
+  PASS setup ready  2ms
+
+== backend fallback ==
+  PASS request clang  resolved backend=msvc
+  PASS request msvc  resolved backend=msvc
+
+== core ==
+  PASS compile  cached
+  PASS add
+  PASS mul
+  PASS host callback
+  PASS retstr
+  PASS host log
+  PASS fib(30)
+  PASS undefined fn
+  PASS address  0x21000
+  PASS symbols
+
+== diagnostics line accuracy ==
+  PASS bad compile fails
+  PASS diag count  1 entries
+  PASS diag line == 3
+
+== eval offset ==
+  PASS eval value
+  PASS eval diag line == 2
+
+== session ==
+  PASS session eval 1
+  PASS session a
+  PASS session eval 2
+  PASS session b sees a
+  PASS session eval 3
+  PASS session var bridge
+  PASS session redeclare
+  PASS session a redeclared
+
+== parallel compile gate ==
+  PASS all jobs finished  9/9
+  PASS peak <= maxParallel  peak=3
+  PASS peak >= 2  peak=3
+  PASS module registered  mods=12 names=par1,par2,par3,sess,par4,eval_0DFC9D48,par5,par6,par7,par8,core,par0
+  PASS par result
+
+== hot reload stress ==
+  PASS reload final value
+  PASS modules alive  13 modules
+
+== large source ==
+  PASS 200 functions compile  0ms, 200 symbols
+  PASS f199(2)
+
+== cache ==
+  PASS second is cached
+  PASS cached value
+
+== auto signature ==
+  PASS scanner in cpp  found=1 sig=d(d)
+  PASS scanner vars in cpp  found=1
+  PASS auto compile  0ms  sigs=d(d) i(ii) v() d(id)  
+  PASS half(10)
+  PASS addi(3,4)
+  PASS mixd(2,0.5)
+  PASS twice(21)
+  PASS halfF(5) float ret/arg
+  PASS isPos(1) bool ret
+  PASS isPos(-1) bool ret
+  PASS bumpc(65) char ret
+  PASS twiceU(7) unsigned
+  PASS sig halfF
+  PASS sig isPos
+  PASS explicit sig call  4.5
+  PASS missing sig rejected
+  PASS hasSig
+  PASS var counter init
+  PASS var after bump
+  PASS setVar
+  PASS var after set+bump
+  PASS const var exposed  3.14159
+  PASS unknown var rejected
+
+== session state across evals ==
+  PASS state eval 1
+  PASS heal(5)
+  PASS state eval 2
+  PASS hp survived recompile
+  PASS dmg(3)
+  PASS hp after dmg
+  PASS state eval 3
+  PASS bonus(2) sees hp
+
+== crash guard ==
+  PASS crash module compiled
+  PASS crash returns 0
+  PASS onError fired
+
+== pointer handle ==
+  PASS fn ptr not null  JitPtr(0x0000C4521030)
+  PASS ptr format
+  PASS null ptr
+
+== overload ==
+  PASS overload compiled
+  PASS overload sig count
+  PASS overload int
+  PASS overload double
+
+== scanner struct/array ==
+  PASS struct parsed  A/2
+  PASS array parsed  array:d:5
+  PASS struct var parsed  struct:P
+
+== posix backend args ==
+  PASS posix -shared  -shared -fPIC -O2 -std=c++17 -DNDEBUG -DRJIT_DEFINE_ABI_EXPORT -fvisibility=hidden -include /c/h.h -I/c -I/d m.cc -o m.so -Wl,-undefined,dynamic_lookup
+  PASS posix -fPIC
+  PASS posix -std
+  PASS posix opt
+  PASS posix -include header
+  PASS posix visibility
+  PASS posix Od to O0
+
+== string args ==
+  PASS needsStringHeader
+  PASS no header needed
+  PASS string compile
+  PASS sig lens
+  PASS sig adds
+  PASS lens hello
+  PASS lens cn utf8
+  PASS mixs int+str
+  PASS adds two strings
+  PASS first char
+  PASS empty string len
+  PASS missing str arg
+
+== struct and array access ==
+  PASS agg compile
+  PASS kind pos  struct
+  PASS fields pos  x,y
+  PASS get pos.x init
+  PASS set pos.x
+  PASS get pos.x
+  PASS set pos.y
+  PASS get pos.y
+  PASS set hero.hp
+  PASS get hero.hp
+  PASS set hero.spd
+  PASS get hero.spd
+  PASS arr size
+  PASS set arr[2]
+  PASS get arr[2]
+  PASS arr oob returns 0
+  PASS set ids[0]
+  PASS get ids[0]
+  PASS dbg ids getIndex0
+  PASS dbg ids setIndex1
+  PASS dbg ids getIndex1
+  PASS unknown field nan
+
+== aggregate state across eval ==
+  PASS agg eval 1
+  PASS agg session x
+  PASS agg eval 2
+  PASS agg survived recompile
+
+== manual pe loader ==
+  PASS manual compile+load
+  PASS manual mapped  sections=6 imports=KERNEL32.dll reloc=0 rebased=false
+  PASS manual sq(7)
+  PASS manual add3
+  PASS manual second module
+  PASS manual tri
+  PASS manual unloaded  base=6442450944 images=0
+  PASS loadlib still works
+
+== pack export / import ==
+  PASS export files  565 files
+  PASS pack manifest ok  pack ok: abi=5 codegen=6 platform=windows-x64 modules=406 bytes=37225472
+  PASS manifest exists
+  PASS headline dll packed
+
+== cache-only mode (no toolchain) ==
+  PASS cold compile
+  PASS toolchain disabled  toolchain disabled by forceUnavailable
+  PASS no cache yet fails  jit: error E_TOOLCHAIN toolchain disabled by forceUnavailable
+  PASS import files  565 files
+  PASS cache-only hit  cached=true
+  PASS cache-only call
+  PASS toolchain restored
+
+== throughput ==
+  PASS 500k calls  0.042us/call  acc=14000000
+
+== stability ==
+  PASS no broken modules  0 broken
+
+[jit] RESULT PASS  (147 passed, 0 failed)
+[jit] ready=true builds=29 cacheHits=63 modules=25
+  backend=msvc exe=cl.exe arch=x64 origin=environment
+  cache=I:\Haxelib\hxcpp_jit_r\test\bin\jitcache size=43092KB
+  module=aggstate id=67 symbols=0 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\bin\jitcache/14F4964804F2DC8E/mod6.dll
+  module=big id=68 symbols=200 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\bin\jitcache/19C7E9141A97ADB2/mod3.dll
+  module=par1 id=69 symbols=1 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\bin\jitcache/3276F4000EBAC066/mod.dll
+  module=agg id=70 symbols=0 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\bin\jitcache/1702657B1396F8D5/mod3.dll
+  module=state id=71 symbols=0 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\bin\jitcache/2B6FF4BF231477BD/mod6.dll
+  module=hotstress id=72 symbols=1 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\bin\jitcache/0F868E8326CB5145/mod6.dll
+  module=par2 id=73 symbols=1 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\bin\jitcache/015F85451D37CCCF/mod.dll
+  module=strs id=74 symbols=0 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\bin\jitcache/0AEED19B1343B53D/mod.dll
+  module=par3 id=75 symbols=1 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\bin\jitcache/3971D7513A22DBAF/mod.dll
+  module=sess id=76 symbols=1 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\bin\jitcache/159D268628E50C70/mod6.dll
+  module=par4 id=77 symbols=1 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\bin\jitcache/2C2FC996190ED258/mod.dll
+  module=eval_0DFC9D48 id=78 symbols=1 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\bin\jitcache/0887FA4711F36315/mod3.dll
+  module=cold id=92 symbols=0 calls=1 dll=I:\Haxelib\hxcpp_jit_r\test\bin\coldcache_145806/3AB0BE083E8DCEAA/mod2.dll
+  module=over id=80 symbols=0 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\bin\jitcache/33AA803A3AD51774/mod3.dll
+  module=par5 id=81 symbols=1 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\bin\jitcache/2AE7689A34341848/mod.dll
+  module=cachedemo id=82 symbols=1 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\bin\jitcache/244B47010D277357/mod3.dll
+  module=par6 id=83 symbols=1 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\bin\jitcache/03521B2319D325F1/mod.dll
+  module=par7 id=84 symbols=1 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\bin\jitcache/3F6C882F125FD601/mod.dll
+  module=crash id=85 symbols=0 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\bin\jitcache/0E38989B1AD5F385/mod3.dll
+  module=par8 id=86 symbols=1 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\bin\jitcache/3FDCDE64135E7B66/mod.dll
+  module=perf id=93 symbols=1 calls=500000 dll=I:\Haxelib\hxcpp_jit_r\test\bin\jitcache/038D468326AAD639/mod.dll
+  module=loadlib id=87 symbols=0 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\bin\jitcache/3F73D9BD31A17807/mod3.dll
+  module=par0 id=88 symbols=1 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\bin\jitcache/269FDA940182044A/mod.dll
+  module=core id=89 symbols=6 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\bin\jitcache/346930DB21D961D1/mod3.dll
+  module=auto id=90 symbols=0 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\bin\jitcache/049721952C0E3853/mod3.dll
+
