@@ -209,7 +209,11 @@ class JitScan {
       var strArgs = 0;
       for (t in rawArgs) {
         var c = code(t);
-        if (c == "?" && sts.exists(StringTools.trim(t))) c = "t";
+        if (c == "?") {
+          var bare = StringTools.trim(t);
+          while (StringTools.endsWith(bare, "&")) bare = StringTools.trim(bare.substr(0, bare.length - 1));
+          if (sts.exists(trimQualifiers(bare))) c = "t";
+        }
         if (c == "?") {
           ok = false;
           break;

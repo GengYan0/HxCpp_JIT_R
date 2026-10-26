@@ -1,6 +1,6 @@
 # HxCpp_JIT_R
 
-Beta 0.0.16
+Beta 0.0.17
 
 Compile and call native C++ while your application is running. Hand it a source string, get a module back, call its functions like any Haxe method.
 
@@ -17,7 +17,7 @@ Behind the call the source goes into a cache directory, is compiled into a share
 - `std::string` results read back with `callStr`
 - Pointer variables: read, write, repoint, and `&name` for the address
 - Pointer and `const char*` members of structs, walked with `JitPtr` and decoded with `str()`
-- Struct parameters and results by value: pass the address in, read the result through a handle
+- Struct parameters by value or by `const T&`, and struct results by value read through a handle
 - `const char*` results read straight back by `callStr`
 - Zero-compile reads and writes for globals, struct fields and array elements
 - Handles resolved once at load, so the call path never reaches the symbol table
@@ -383,6 +383,16 @@ p.readF64(8);   // 6
 
 The buffer behind the handle belongs to the function, so the next call to the same function overwrites it. Copy what you need, or keep a different function per slot.
 
+References to a struct work the same way, since a reference reaches the callee as an address:
+
+```haxe
+double len3(const Vec2& v);
+void bump(Vec2& v);
+
+m.callAuto("len3", [m.get("&gv")]);   // reads gv
+m.callAuto("bump", [m.get("&gv")]);   // writes gv
+```
+
 ### Expressions
 
 ```haxe
@@ -711,7 +721,6 @@ Time goes into compiler process startup and linking, not into the amount of code
 - Up to six numeric and four string arguments per call
 - Return values are numeric or `void`; pointers come back as addresses and `std::string` results go through `callStr`
 - Struct results by value land in a per function buffer that the next call to that function overwrites; copy it out before calling again
-- Struct parameters that are references (`const Vec2&`) are not recognised and need a wrapper
 - C++ default arguments are not filled in
 - Overloads resolve to the first match; use `callSig` for the others
 - Every guarded call costs an indirect jump; `callFast` removes the SEH guard but also removes crash containment
@@ -728,7 +737,7 @@ Time goes into compiler process startup and linking, not into the amount of code
 
 ## Testing
 
-`test/` is a standalone console project with 306 assertions.
+`test/` is a standalone console project with 308 assertions.
 
 ```
 cd test
@@ -736,7 +745,7 @@ haxe build.hxml
 bin/Main.exe
 ```
 
-Covers: core calls, diagnostic line numbers, expression offset, automatic signatures, string arguments, string and `RJIT_RETSTR` results, struct and array access, struct arrays and nested fields, pointer and string members, expressions, bound handles, overlapping signatures, struct parameters and results by value, multiple translation units and their globals, pointer variables and address-of, bulk transfer, session state including struct arrays, crash isolation and error callback, pointer handle, overload dispatch, concurrency gate, hot reload, file watch, large source, cache hit, cache packaging and import, compiler-less mode, manual mapping and unload, ELF header parsing, call throughput.
+Covers: core calls, diagnostic line numbers, expression offset, automatic signatures, string arguments, string and `RJIT_RETSTR` results, struct and array access, struct arrays and nested fields, pointer and string members, expressions, bound handles, overlapping signatures, struct parameters by value and by reference, struct results by value, multiple translation units and their globals, pointer variables and address-of, bulk transfer, session state including struct arrays, crash isolation and error callback, pointer handle, overload dispatch, concurrency gate, hot reload, file watch, large source, cache hit, cache packaging and import, compiler-less mode, manual mapping and unload, ELF header parsing, call throughput.
 
 Linux:
 

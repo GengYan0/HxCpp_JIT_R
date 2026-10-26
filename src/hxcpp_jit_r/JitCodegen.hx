@@ -210,6 +210,12 @@ class JitCodegen {
     return 'extern "C" RJIT_API double ' + name + '(void* f, RJitArgs* a) { ' + call + ' }\n';
   }
 
+  public static function pointee(raw:String):String {
+    var t = StringTools.trim(raw);
+    while (StringTools.endsWith(t, "&")) t = StringTools.trim(t.substr(0, t.length - 1));
+    return t;
+  }
+
   public static function retWrapper(f:JitFnInfo):String {
     var types:Array<String> = [];
     var expr:Array<String> = [];
@@ -220,7 +226,7 @@ class JitCodegen {
       var raw = f.rawArgs != null && i < f.rawArgs.length ? StringTools.trim(f.rawArgs[i]) : null;
       if (c == "t" && raw != null && raw != "") {
         types.push(raw);
-        expr.push("*((" + raw + "*)(size_t)args->a[" + numSlot + "])");
+        expr.push("*((" + pointee(raw) + "*)(size_t)args->a[" + numSlot + "])");
         numSlot++;
       } else if (c == "s" || c == "S") {
         types.push(cppType(c));
@@ -253,7 +259,7 @@ class JitCodegen {
       var raw = f.rawArgs != null && i < f.rawArgs.length ? StringTools.trim(f.rawArgs[i]) : null;
       if (c == "t" && raw != null && raw != "") {
         types.push(raw);
-        expr.push("*((" + raw + "*)(size_t)a->a[" + numSlot + "])");
+        expr.push("*((" + pointee(raw) + "*)(size_t)a->a[" + numSlot + "])");
         numSlot++;
       } else if (c == "s" || c == "S") {
         types.push(cppType(c));

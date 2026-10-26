@@ -396,7 +396,7 @@ int ids[3];
     ok("cold compile", c1.ok);
     Jit.exportPack("packcold");
     hxcpp_jit_r.JitToolchain.forceUnavailable = true;
-    var coldDir = "coldcache_" + Std.string(Std.random(1000000));
+    var coldDir = "coldcache_" + Std.string(Std.int(Sys.time() * 1000)) + "_" + Std.string(Std.random(1000));
     Jit.setup({cache: coldDir});
     ok("toolchain disabled", !Jit.ready, Jit.lastError);
     var beforeImp = Jit.compile("cold", coldSrc);
@@ -429,16 +429,18 @@ int ids[3];
 
     head("concurrent cold build");
     var oldCache = Jit.cacheDir;
-    var cdir = "coldconc_" + Std.string(Std.random(1000000));
+    var cdir = "coldconc_" + Std.string(Std.int(Sys.time() * 1000)) + "_" + Std.string(Std.random(1000));
     Jit.setup({cache: cdir});
     ok("cold cache switched", Jit.cache.root.indexOf(cdir) >= 0, Jit.cache.root);
     Jit.maxParallel = 2;
     var done = 0;
+    var faults:Array<String> = [];
     var salt = Std.string(Std.random(1000000));
     for (i in 0...4) {
       var src = "double gx" + i + " = " + (i + 1) + ".0;\nint cv" + i + "(int x) { return x * " + (i + 1) + "; }\n";
       Jit.compileAsync("conc" + i, "int pad" + i + " = " + Std.int(Math.random() * 99999) + ";\n" + src, function(m) {
         if (m != null && m.ok) done++;
+        else faults.push(m == null ? "null" : (m.diag.length > 0 ? JitCompiler.describe(m.diag[0]) : "ok=false"));
       });
     }
     var spin = 0;
@@ -447,7 +449,7 @@ int ids[3];
       Sys.sleep(0.02);
       spin++;
     }
-    ok("concurrent cold build", done == 4, "done=" + done + " pending=" + Jit.pending() + " ticks=" + spin);
+    ok("concurrent cold build", done == 4, "done=" + done + " pending=" + Jit.pending() + " ticks=" + spin + (faults.length > 0 ? " " + faults.join(" | ") : ""));
     Jit.maxParallel = 2;
     Jit.setup({cache: oldCache});
     ok("cache restored", Jit.cache.root.indexOf("jitcache") >= 0, Jit.cache.root);
@@ -607,6 +609,8 @@ void setv(double x, double y) { gv.x = x; gv.y = y; }
 double len2(Vec2 v) { return v.x + v.y; }
 double scale2(Vec2 v, double k) { return (v.x + v.y) * k; }
 Vec2 mk(double x, double y) { Vec2 r; r.x = x; r.y = y; return r; }
+double len3(const Vec2& v) { return v.x * 3 + v.y; }
+void bump(Vec2& v) { v.x = v.x + 10; }
 ');
     ok("by value module compiles", bv.ok, bv.diag.length > 0 ? JitCompiler.describe(bv.diag[0]) : "");
     bv.callAuto("setv", [3, 4]);
@@ -619,6 +623,8 @@ Vec2 mk(double x, double y) { Vec2 r; r.x = x; r.y = y; return r; }
     eq("struct return y", Std.string(rv.readF64(8)), "6");
     eq("struct return through callAuto", Std.string(bv.callAuto("mk", [7, 8]) != 0), "true");
     eq("struct return second field", Std.string(new JitPtr(bv.callAuto("mk", [9, 10])).readF64(8)), "10");
+    eq("const reference parameter", Std.string(bv.callAuto("len3", [bv.get("&gv")])), "13");
+    ok("mutable reference parameter", bv.callAuto("bump", [bv.get("&gv")]) == 0 && bv.get("gv.x") == 13, "");
 
     head("expressions");
     var ex = Jit.compile("exprm", "
