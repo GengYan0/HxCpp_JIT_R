@@ -3,7 +3,7 @@ package hxcpp_jit_r;
 import sys.FileSystem;
 import sys.io.File;
 
-typedef PeSection = {
+typedef JitSection = {
   var name:String;
   var va:Int;
   var vsize:Int;
@@ -12,12 +12,12 @@ typedef PeSection = {
   var chars:Int;
 }
 
-typedef PeDir = {
+typedef JitDir = {
   var rva:Int;
   var size:Int;
 }
 
-class PeImage {
+class JitImage {
   public var path:String = "";
   public var base:cpp.SizeT = 0;
   public var imageBase:Float = 0;
@@ -25,11 +25,13 @@ class PeImage {
   public var sizeOfHeaders:Int = 0;
   public var entry:Int = 0;
   public var pe32plus:Bool = true;
-  public var dirs:Array<PeDir> = [];
-  public var sections:Array<PeSection> = [];
+  public var dirs:Array<JitDir> = [];
+  public var sections:Array<JitSection> = [];
   public var exports:Map<String, Int> = new Map();
   public var forwarders:Map<String, String> = new Map();
   public var imports:Array<String> = [];
+  public var handles:Array<cpp.SizeT> = [];
+  public var fwdCache:Map<String, Float> = new Map();
   public var tlsIndex:Int = -1;
   public var tlsStart:cpp.SizeT = 0;
   public var tlsEnd:cpp.SizeT = 0;
@@ -44,17 +46,17 @@ class PeImage {
   public function new() {}
 
   public function summary():String {
-    if (!ok) return "pe " + path + " FAILED: " + error;
-    return 'pe $path base=0x${StringTools.hex(Std.int(base), 0)} image=${sizeOfImage}B sections=${sections.length} exports=${Lambda.count(exports)} imports=${imports.length} reloc=$relocCount rebased=$rebased manual=$manual';
+    if (!ok) return "image " + path + " FAILED: " + error;
+    return 'image $path base=0x${StringTools.hex(Std.int(base), 0)} image=${sizeOfImage}B sections=${sections.length} exports=${Lambda.count(exports)} imports=${imports.length} reloc=$relocCount rebased=$rebased manual=$manual';
   }
 }
 
-class JitPe {
+class JitLoader {
   public static var verbose:Bool = false;
   public static var allowEntryFail:Bool = true;
   public static var skipEntry:Bool = false;
   public static var lastEntryFault:Int = 0;
-  static var images:Map<String, PeImage> = new Map();
+  static var images:Map<String, JitImage> = new Map();
 
   static inline function at(base:cpp.SizeT, off:Int):cpp.SizeT {
     return JitNative.toSizeT(JitNative.toFloat(base) + off);
@@ -80,8 +82,8 @@ class JitPe {
     return b.toString();
   }
 
-  public static function parse(path:String):PeImage {
-    var img = new PeImage();
+  public static function parse(path:String):JitImage {
+    var img = new JitImage();
     img.path = JitCache.normalize(path);
     if (!FileSystem.exists(path)) {
       img.error = "file not found";
@@ -168,7 +170,7 @@ class JitPe {
     return img;
   }
 
-  public static function load(path:String):PeImage {
+  public static function load(path:String):JitImage {
     var img = parse(path);
     if (!img.ok) return img;
     var bytes = File.getBytes(path);
@@ -182,7 +184,7 @@ class JitPe {
       return img;
     }
     img.base = base;
-    if (verbose) Sys.println("[pe] alloc base=0x" + StringTools.hex(Std.int(JitNative.toFloat(base)), 0) + " want=0x" + StringTools.hex(Std.int(img.imageBase), 0) + " size=" + img.sizeOfImage);
+    if (verbose) Sys.println("[load] alloc base=0x" + StringTools.hex(Std.int(JitNative.toFloat(base)), 0) + " want=0x" + StringTools.hex(Std.int(img.imageBase), 0) + " size=" + img.sizeOfImage);
     var delta = JitNative.toFloat(base) - img.imageBase;
     img.rebased = delta != 0;
 
@@ -200,7 +202,7 @@ class JitPe {
       JitNative.memcpyRaw(at(base, s.va), JitNative.toSizeT(JitNative.toFloat(src) + s.raw), len);
     }
 
-    if (verbose) Sys.println("[pe] sections copied");
+    if (verbose) Sys.println("[load] sections copied");
     if (img.rebased && !applyRelocs(img, delta)) {
       img.ok = false;
       img.error = "image needs rebasing but has no usable relocation table";
@@ -209,26 +211,26 @@ class JitPe {
       return img;
     }
 
-    if (verbose) Sys.println("[pe] reloc done n=" + img.relocCount);
+    if (verbose) Sys.println("[load] reloc done n=" + img.relocCount);
     if (!resolveImports(img)) {
       JitNative.vfree(base, img.sizeOfImage);
       img.base = 0;
       return img;
     }
 
-    if (verbose) Sys.println("[pe] imports done " + img.imports.join(","));
+    if (verbose) Sys.println("[load] imports done " + img.imports.join(","));
     setupTls(img);
-    if (verbose) Sys.println("[pe] tls idx=" + img.tlsIndex);
+    if (verbose) Sys.println("[load] tls idx=" + img.tlsIndex);
     parseExports(img);
-    if (verbose) Sys.println("[pe] exports=" + Lambda.count(img.exports) + " fwd=" + Lambda.count(img.forwarders));
+    if (verbose) Sys.println("[load] exports=" + Lambda.count(img.exports) + " fwd=" + Lambda.count(img.forwarders));
     registerUnwind(img);
     JitNative.flushIcache(base, img.sizeOfImage);
-    if (verbose) Sys.println("[pe] calling entry 0x" + StringTools.hex(img.entry, 0));
+    if (verbose) Sys.println("[load] calling entry 0x" + StringTools.hex(img.entry, 0));
 
     if (img.entry != 0 && !skipEntry) {
       lastEntryFault = 0;
       var rc = JitNative.callEntry(at(base, img.entry), base, 1, 0);
-      if (verbose) Sys.println("[pe] entry rc=" + rc + " fault=0x" + StringTools.hex(lastEntryFault, 8));
+      if (verbose) Sys.println("[load] entry rc=" + rc + " fault=0x" + StringTools.hex(lastEntryFault, 8));
       if (rc == 0 && !allowEntryFail) {
         img.ok = false;
         img.error = "DllMain returned FALSE";
@@ -241,11 +243,11 @@ class JitPe {
     }
     img.manual = true;
     images.set(Std.string(base), img);
-    if (verbose) Sys.println("[pe] " + img.summary());
+    if (verbose) Sys.println("[load] " + img.summary());
     return img;
   }
 
-  static function applyRelocs(img:PeImage, delta:Float):Bool {
+  static function applyRelocs(img:JitImage, delta:Float):Bool {
     var d = img.dirs[5];
     if (d.rva == 0 || d.size == 0) return false;
     var base = img.base;
@@ -254,7 +256,7 @@ class JitPe {
     while (p < d.size) {
       var va = Std.int(JitNative.peek(at(base, d.rva + p), 4));
       var blockSize = Std.int(JitNative.peek(at(base, d.rva + p + 4), 4));
-      if (blockSize < 8 || va == 0 && blockSize <= 8) break;
+      if (blockSize < 8) break;
       var cnt = Std.int((blockSize - 8) / 2);
       for (i in 0...cnt) {
         var e = Std.int(JitNative.peek(at(base, d.rva + p + 8 + i * 2), 2));
@@ -270,7 +272,7 @@ class JitPe {
     return n > 0;
   }
 
-  static function resolveImports(img:PeImage):Bool {
+  static function resolveImports(img:JitImage):Bool {
     var d = img.dirs[1];
     if (d.rva == 0) return true;
     var base = img.base;
@@ -292,9 +294,11 @@ class JitPe {
       if (h == 0) {
         img.ok = false;
         img.error = "import dll not loadable: " + dll;
+        releaseLibs(img);
         return false;
       }
       img.imports.push(dll);
+      img.handles.push(h);
       var thunkRva = origThunk != 0 ? origThunk : firstThunk;
       var i = 0;
       while (i < 65536) {
@@ -320,6 +324,7 @@ class JitPe {
         if (addr == 0) {
           img.ok = false;
           img.error = "unresolved import in " + dll + " slot " + i;
+          releaseLibs(img);
           return false;
         }
         JitNative.poke(at(base, firstThunk + i * ps), ps, JitNative.toFloat(addr));
@@ -330,7 +335,13 @@ class JitPe {
     return true;
   }
 
-  static function setupTls(img:PeImage):Void {
+  static function releaseLibs(img:JitImage):Void {
+    for (h in img.handles) JitNative.unloadDll(h);
+    img.handles = [];
+    img.imports = [];
+  }
+
+  static function setupTls(img:JitImage):Void {
     var d = img.dirs[9];
     if (d.rva == 0 || d.size < 24) return;
     var base = img.base;
@@ -366,14 +377,14 @@ class JitPe {
     }
   }
 
-  static function teardownTls(img:PeImage):Void {
+  static function teardownTls(img:JitImage):Void {
     if (img.tlsIndex >= 0) {
       JitNative.clearTls(img.tlsIndex);
       img.tlsIndex = -1;
     }
   }
 
-  static function parseExports(img:PeImage):Void {
+  static function parseExports(img:JitImage):Void {
     var d = img.dirs[0];
     if (d.rva == 0 || d.size == 0) return;
     var base = img.base;
@@ -398,7 +409,7 @@ class JitPe {
     }
   }
 
-  static function registerUnwind(img:PeImage):Void {
+  static function registerUnwind(img:JitImage):Void {
     var d = img.dirs[3];
     if (d.rva == 0 || d.size < 12) return;
     var first = Std.int(JitNative.peek(at(img.base, d.rva), 4));
@@ -406,7 +417,7 @@ class JitPe {
     JitNative.addFnTable(at(img.base, d.rva), Std.int(d.size / 12), img.base);
   }
 
-  public static function proc(img:PeImage, name:String):cpp.SizeT {
+  public static function proc(img:JitImage, name:String):cpp.SizeT {
     if (img == null) return 0;
     if (!img.manual) {
       if (img.handle == 0) return 0;
@@ -414,6 +425,8 @@ class JitPe {
     }
     var rva = img.exports.get(name);
     if (rva != null) return at(img.base, rva);
+    var cached = img.fwdCache.get(name);
+    if (cached != null) return JitNative.toSizeT(cached);
     var fwd = img.forwarders.get(name);
     if (fwd != null) {
       var dot = fwd.lastIndexOf(".");
@@ -423,16 +436,18 @@ class JitPe {
       if (dll.indexOf(".") < 0) dll = dll + ".dll";
       var h = JitNative.loadLibA(dll);
       if (h == 0) return 0;
-      return JitNative.getProc(h, fn);
+      var a = JitNative.getProc(h, fn);
+      img.fwdCache.set(name, JitNative.toFloat(a));
+      return a;
     }
     return 0;
   }
 
-  public static function find(base:cpp.SizeT):PeImage {
+  public static function find(base:cpp.SizeT):JitImage {
     return images.get(Std.string(base));
   }
 
-  public static function unload(img:PeImage):Bool {
+  public static function unload(img:JitImage):Bool {
     if (img == null || !img.ok) return false;
     if (!img.manual) {
       if (img.handle != 0) JitNative.unloadDll(img.handle);
@@ -442,6 +457,8 @@ class JitPe {
     }
     if (img.entry != 0) JitNative.callEntry(at(img.base, img.entry), img.base, 0, 0);
     teardownTls(img);
+    img.fwdCache = new Map();
+    releaseLibs(img);
     images.remove(Std.string(img.base));
     JitNative.vfree(img.base, img.sizeOfImage);
     img.base = 0;

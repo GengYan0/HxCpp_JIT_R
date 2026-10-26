@@ -1,5 +1,7 @@
 # hxcpp_jit_r
 
+**Beta (0.0.9)** — 接口在 1.0 之前可能调整。
+
 在运行中的 hxcpp 应用里编译并执行原生 C++。源码以字符串或文件形式在运行时编译成动态库，装载后按 C 调用约定直接调用导出函数。
 
 不需要改引擎源码，不需要重新链接可执行文件，不需要预先在工程里声明 `.cpp`。
@@ -18,7 +20,7 @@
 - 崩溃隔离：每次跨边界调用都有 SEH 保护，原生代码段错误只返回错误值，宿主进程存活
 - 编译缓存：key 由源码与编译选项计算，二次加载 2ms
 - 缓存分发：把已编译产物打包，在没有编译器的机器上直接装载
-- 手动 PE 加载：可绕过 `LoadLibrary`，自行映射镜像、修正重定位、解析导入表、调用 `DllMain`
+- 手动镜像加载：可绕过 `LoadLibrary`，自行映射段、修正重定位、解析导入表、调用 `DllMain`
 - 编译诊断：错误带原始行号，输出按系统代码页解码
 - 异步编译：`compileAsync` 加并发闸门，不阻塞主线程
 
@@ -156,7 +158,7 @@ m.getVar("counter");        // 1
 | `Jit.packInfo(dir):String` | 校验缓存包 |
 | `Jit.get(name)` / `Jit.all()` / `Jit.dispose(name)` | 模块管理 |
 | `Jit.tick()` | 每帧驱动异步结果与延迟卸载 |
-| `Jit.hook()` | 挂到 openfl `ENTER_FRAME` |
+| `Jit.hook()` | 绑定到宿主每帧事件 |
 | `Jit.bind(name, fn)` / `Jit.unbind(name)` | 注册宿主回调 |
 | `Jit.stats()` / `Jit.purge()` / `Jit.sweep(keep)` | 状态与清理 |
 | `Jit.selfTest():String` | 内置自检 |
@@ -165,7 +167,7 @@ m.getVar("counter");        // 1
 
 | 方法 / 字段 | 说明 |
 |---|---|
-| `ok` / `dll` / `pe` / `symbols` / `ms` / `cached` / `diag` / `log` | 状态 |
+| `ok` / `dll` / `image` / `symbols` / `ms` / `cached` / `diag` / `log` | 状态 |
 | `call(name, a0..a5):Float` | 6 个 `double` 参数 |
 | `callA(name, args)` | 参数个数可选 |
 | `callAuto(name, args, ?strs)` | 按扫描到的签名转换，字符串走第三参数 |
@@ -357,13 +359,13 @@ m.callAuto("boom", [1]);   // 0，回调触发，进程存活
 ```haxe
 var m = Jit.compile("mod", src, {loader: "manual"});
 
-m.pe.manual;        // true
-m.pe.base;          // 加载基址
-m.pe.relocCount;    // 应用的重定位条数
-m.pe.imports;       // 依赖模块
+m.image.manual;        // true
+m.image.base;          // 加载基址
+m.image.relocCount;    // 应用的重定位条数
+m.image.imports;       // 依赖模块
 ```
 
-手动映射的模块不在系统模块链表里，`GetModuleHandle` 找不到它，卸载必须走 `Jit.dispose`。多线程访问动态库内的 TLS 变量时，在新线程调用 `JitPe.bindThread()`。
+手动映射的模块不在系统模块链表里，`GetModuleHandle` 找不到它，卸载必须走 `Jit.dispose`。多线程访问动态库内的 TLS 变量时，在新线程调用 `JitLoader.bindThread()`。
 
 ### 11. 分发预编译缓存
 
@@ -480,13 +482,14 @@ Jit.setup({
 - SEH 只捕获硬件异常，C++ 异常跨越库边界属于未定义行为
 - 编译超时通过终止编译器进程实现
 - 结构体访问器只覆盖第一层数值字段，嵌套结构和指针成员要自行封装函数
+- 手动镜像加载目前只实现了 Windows PE 格式，ELF 走系统加载器
 - 修改 ABI 头结构后需要清理宿主侧预编译头再重新构建
 
 ---
 
 ## 测试
 
-`test/` 是独立 console 工程，147 项断言。
+`test/` 是独立 console 工程，158 项断言。
 
 ```
 cd test
@@ -513,7 +516,7 @@ src/hxcpp_jit_r/
   JitSession.hx     会话：累积源码与状态恢复
   JitScan.hx        源码扫描：函数签名、全局变量、结构体、数组
   JitCodegen.hx     生成调用入口、调度器、变量访问器
-  JitPe.hx          PE 解析与手动映射
+  JitLoader.hx      镜像解析与手动映射
   JitPack.hx        缓存打包与校验
   JitPtr.hx         指针句柄
   JitCompiler.hx    编译器调用、预编译头、诊断解析

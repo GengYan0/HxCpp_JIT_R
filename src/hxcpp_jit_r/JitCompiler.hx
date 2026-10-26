@@ -32,6 +32,9 @@ class JitCompiler {
   public var lastCommand:String = "";
   public var timeoutMs:Int = 90000;
   public var usePch:Bool = true;
+  #if target.threaded
+  static var pchLock = new sys.thread.Mutex();
+  #end
   var pchState:Int = 0;
   var pchFile:String = "";
   var pchObj:String = "";
@@ -51,6 +54,24 @@ class JitCompiler {
 
   public function prepare():Bool {
     if (!usePch || tool.backend != "msvc") return false;
+    if (pchState == 1) return true;
+    #if target.threaded
+    pchLock.acquire();
+    #end
+    var r = false;
+    try {
+      r = prepareLocked();
+    } catch (e:Dynamic) {
+      if (Jit.debug) Jit.log("[jit] pch prepare failed: " + Std.string(e));
+      r = false;
+    }
+    #if target.threaded
+    pchLock.release();
+    #end
+    return r;
+  }
+
+  function prepareLocked():Bool {
     if (pchState != 0) return pchState == 1;
     pchState = -1;
     if (!tool.ready) return false;
@@ -94,7 +115,7 @@ class JitCompiler {
 
   public function build(key:String, src:String, lineShift:Int = 0, sigs:Array<String> = null):JitResult {
     var t0 = Sys.time();
-    if (pchState == 0 && isMsvcLike()) prepare();
+    if (pchState != 1 && isMsvcLike()) prepare();
     var dir = cache.dirFor(key);
     var cpp = dir + "/mod" + (isMsvcLike() ? ".cpp" : ".cc");
     var tail = JitCodegen.emit(JitScan.functions(src), JitScan.globals(src), sigs, JitScan.structs(src));

@@ -2,7 +2,7 @@ package hxcpp_jit_r;
 
 import hxcpp_jit_r.JitCompiler.JitDiag;
 import hxcpp_jit_r.JitCompiler.JitResult;
-import hxcpp_jit_r.JitPe.PeImage;
+import hxcpp_jit_r.JitLoader.JitImage;
 import sys.FileSystem;
 import sys.io.File;
 
@@ -44,7 +44,7 @@ class Jit {
 
   static var mods:Map<String, JitModule> = new Map();
   static var nextId:Int = 1;
-  static var retired:Array<{h:cpp.SizeT, t:Int, pe:PeImage}> = [];
+  static var retired:Array<{h:cpp.SizeT, t:Int, image:JitImage}> = [];
   static var jobs:Array<JitJob> = [];
   static var queue:Array<JitJob> = [];
   static var running:Int = 0;
@@ -269,8 +269,8 @@ class Jit {
     for (n in names) dispose(n);
   }
 
-  public static function retire(h:cpp.SizeT, pe:PeImage = null):Void {
-    if (h != 0 || pe != null) retired.push({h: h, t: frame, pe: pe});
+  public static function retire(h:cpp.SizeT, image:JitImage = null):Void {
+    if (h != 0 || image != null) retired.push({h: h, t: frame, image: image});
   }
 
   public static function tick():Void {
@@ -279,7 +279,7 @@ class Jit {
       var keep = [];
       for (r in retired) {
         if (frame - r.t >= 3) {
-          if (r.pe != null) JitPe.unload(r.pe) else JitNative.unloadDll(r.h);
+          if (r.image != null) JitLoader.unload(r.image) else JitNative.unloadDll(r.h);
         } else keep.push(r);
       }
       retired = keep;
@@ -289,7 +289,11 @@ class Jit {
       for (j in jobs) {
         if (j.done) {
           running--;
-          finish(j);
+          try {
+            finish(j);
+          } catch (e:Dynamic) {
+            if (verbose) Sys.println("[jit] finish failed: " + Std.string(e));
+          }
         } else {
           keep.push(j);
         }
@@ -382,23 +386,23 @@ class Jit {
     #end
   }
 
-  static function sym(pe:PeImage, h:cpp.SizeT, n:String):cpp.SizeT {
-    return pe != null ? JitPe.proc(pe, n) : JitNative.getProc(h, n);
+  static function sym(image:JitImage, h:cpp.SizeT, n:String):cpp.SizeT {
+    return image != null ? JitLoader.proc(image, n) : JitNative.getProc(h, n);
   }
 
   static function load(m:JitModule, dll:String):Bool {
     if (debug) log("[jit] load 1 " + dll);
     var h:cpp.SizeT = 0;
     if (loader == "auto" || loader == "manual") {
-      var pe = JitPe.load(dll);
-      if (pe.ok) {
-        m.pe = pe;
-        h = pe.base;
+      var image = JitLoader.load(dll);
+      if (image.ok) {
+        m.image = image;
+        h = image.base;
       } else if (loader == "manual") {
-        m.diag.push(diag("E_PE", pe.error));
+        m.diag.push(diag("E_PE", image.error));
         return false;
       } else if (debug) {
-        log("[jit] manual map skipped: " + pe.error);
+        log("[jit] manual map skipped: " + image.error);
       }
     }
     if (h == 0) {
@@ -409,26 +413,26 @@ class Jit {
         return false;
       }
     }
-    var abi = sym(m.pe, h, "rjit_abi");
+    var abi = sym(m.image, h, "rjit_abi");
     if (abi != 0) {
       var v = Std.int(JitNative.invoke(abi, 0, 0, 0, 0, 0, 0, 0, 0));
       if (v != JitAbi.VERSION) {
-        if (m.pe != null) JitPe.unload(m.pe) else JitNative.unloadDll(h);
-        m.pe = null;
+        if (m.image != null) JitLoader.unload(m.image) else JitNative.unloadDll(h);
+        m.image = null;
         m.diag.push(diag("E_ABI", 'dll abi $v != host ' + JitAbi.VERSION));
         return false;
       }
     }
     var c = JitNative.mkctx(m.id);
     if (c == 0) {
-      if (m.pe != null) JitPe.unload(m.pe) else JitNative.unloadDll(h);
-      m.pe = null;
+      if (m.image != null) JitLoader.unload(m.image) else JitNative.unloadDll(h);
+      m.image = null;
       m.diag.push(diag("E_CTX", "context allocation failed"));
       return false;
     }
     m.attach(h, c);
     m.dll = dll;
-    var init = sym(m.pe, h, "rjit_init");
+    var init = sym(m.image, h, "rjit_init");
     if (init != 0) {
       var rc = Std.int(JitNative.invoke(init, c, 0, 0, 0, 0, 0, 0, 0));
       if (rc != 0) m.diag.push(diag("E_INIT", "rjit_init returned " + rc));

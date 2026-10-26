@@ -558,7 +558,7 @@ class JitNative {
   public static function callEntry(entry:cpp.SizeT, hinst:cpp.SizeT, reason:Int, reserved:cpp.SizeT):Int return 0;
 
   public static function onEntryFault(code:Int):Void {
-    JitPe.lastEntryFault = code;
+    JitLoader.lastEntryFault = code;
   }
 
   @:functionCode('

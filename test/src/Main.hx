@@ -311,13 +311,13 @@ int ids[3];
     eq("agg survived recompile", Std.string(as.call("total")), "10");
     as.dispose();
 
-    head("manual pe loader");
+    head("manual loader");
     var manSrc = "int sq(int x) { return x * x; }\nint add3(int a, int b, int c) { return a + b + c; }\ndouble half(double v) { return v / 2; }\n";
     var mp = Jit.compile("man", manSrc, {loader: "manual"});
     ok("manual compile+load", mp.ok, mp.diag.length > 0 ? JitCompiler.describe(mp.diag[0]) : "");
-    if (mp.ok && mp.pe != null) {
-      var pe = mp.pe;
-      ok("manual mapped", pe.manual, "sections=" + pe.sections.length + " imports=" + pe.imports.join("+") + " reloc=" + pe.relocCount + " rebased=" + pe.rebased);
+    if (mp.ok && mp.image != null) {
+      var img = mp.image;
+      ok("manual mapped", img.manual, "sections=" + img.sections.length + " imports=" + img.imports.join("+") + " reloc=" + img.relocCount + " rebased=" + img.rebased);
       eq("manual sq(7)", Std.string(mp.callAuto("sq", [7])), "49");
       eq("manual add3", Std.string(mp.callAuto("add3", [1, 2, 3])), "6");
       var top = Jit.compile("man2", "double tri(double v) { return v * 3; }\n", {loader: "manual"});
@@ -325,13 +325,13 @@ int ids[3];
       eq("manual tri", Std.string(top.callAuto("tri", [5])), "15");
       Jit.dispose("man2");
     } else {
-      ok("manual mapped", false, "pe missing");
+      ok("manual mapped", false, "image missing");
     }
     var manMod = Jit.get("man");
-    var manBase:cpp.SizeT = (manMod != null && manMod.pe != null) ? manMod.pe.base : 0;
+    var manBase:cpp.SizeT = (manMod != null && manMod.image != null) ? manMod.image.base : 0;
     Jit.dispose("man");
     for (i in 0...6) Jit.tick();
-    ok("manual unloaded", manBase != 0 && hxcpp_jit_r.JitPe.find(manBase) == null, "base=" + JitNative.toFloat(manBase) + " images=" + hxcpp_jit_r.JitPe.count());
+    ok("manual unloaded", manBase != 0 && hxcpp_jit_r.JitLoader.find(manBase) == null, "base=" + JitNative.toFloat(manBase) + " images=" + hxcpp_jit_r.JitLoader.count());
     var lb = Jit.compile("loadlib", "int six() { return 6; }\n", {loader: "loadlib"});
     eq("loadlib still works", Std.string(lb.callAuto("six", [])), "6");
 
@@ -363,6 +363,48 @@ int ids[3];
     hxcpp_jit_r.JitToolchain.forceUnavailable = false;
     Jit.setup({cache: "jitcache"});
     ok("toolchain restored", Jit.ready);
+
+    head("edge cases");
+    var em = Jit.compile("empty", "");
+    ok("empty source compiles", em.ok, em.diag.length > 0 ? JitCompiler.describe(em.diag[0]) : "");
+    eq("empty has no funcs", Std.string(em.fnNames().length), "0");
+    var bm = Jit.compile("broken", "int f() { return ; }");
+    ok("broken source rejected", !bm.ok, bm.diag.length > 0 ? JitCompiler.describe(bm.diag[0]) : "no diag");
+    ok("broken has no dll", bm.dll == "", bm.dll);
+    var gm = Jit.compile("guard2", "int gf(int x) { return x + 1; }\n");
+    eq("bad sig returns 0", Std.string(gm.callSig("gf", "garbage", [1])), "0");
+    eq("unknown fn returns 0", Std.string(gm.callAuto("nope", [1])), "0");
+    ok("unknown path is nan", gm.get("nosuch[0]") != gm.get("nosuch[0]"), "");
+    var dm = Jit.compile("disp", "int dv() { return 1; }\n");
+    Jit.dispose("disp");
+    Jit.dispose("disp");
+    Jit.dispose("no_such_module");
+    ok("double dispose safe", true, "");
+
+    head("concurrent cold build");
+    var oldCache = Jit.cacheDir;
+    var cdir = "coldconc_" + Std.string(Std.random(1000000));
+    Jit.setup({cache: cdir});
+    ok("cold cache switched", Jit.cache.root.indexOf(cdir) >= 0, Jit.cache.root);
+    Jit.maxParallel = 2;
+    var done = 0;
+    var salt = Std.string(Std.random(1000000));
+    for (i in 0...4) {
+      var src = "double gx" + i + " = " + (i + 1) + ".0;\nint cv" + i + "(int x) { return x * " + (i + 1) + "; }\n";
+      Jit.compileAsync("conc" + i, "int pad" + i + " = " + Std.int(Math.random() * 99999) + ";\n" + src, function(m) {
+        if (m != null && m.ok) done++;
+      });
+    }
+    var spin = 0;
+    while (Jit.pending() > 0 && spin < 1200) {
+      Jit.tick();
+      Sys.sleep(0.02);
+      spin++;
+    }
+    ok("concurrent cold build", done == 4, "done=" + done + " pending=" + Jit.pending() + " ticks=" + spin);
+    Jit.maxParallel = 2;
+    Jit.setup({cache: oldCache});
+    ok("cache restored", Jit.cache.root.indexOf("jitcache") >= 0, Jit.cache.root);
 
     head("throughput");
     var pm = Jit.compile("perf", "RJIT(mix) { double s = 0; for (int i = 0; i < 8; i++) s += (double)i * RJIT_A0; return s; }\n");

@@ -1,0 +1,57 @@
+name: windows
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 40
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install Haxe
+        run: choco install haxe -y --no-progress
+
+      - name: Setup haxelib
+        shell: pwsh
+        run: |
+          haxe --version
+          haxelib setup C:\haxelib
+          haxelib install hxcpp --quiet
+          haxelib dev hxcpp_jit_r "$env:GITHUB_WORKSPACE"
+          haxelib list
+
+      - name: Build tests
+        shell: pwsh
+        working-directory: test
+        run: haxe build.hxml
+
+      - name: Run tests
+        shell: pwsh
+        working-directory: test
+        run: |
+          $out = & .\bin\Main.exe 2>&1 | Out-String
+          Write-Host $out
+          if ($out -notmatch "RESULT PASS") {
+            Write-Error "test suite did not report RESULT PASS"
+            exit 1
+          }
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report
+          path: test/bin/test-report.txt
+          if-no-files-found: ignore

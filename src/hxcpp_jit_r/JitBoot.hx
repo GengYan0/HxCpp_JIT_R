@@ -65,13 +65,13 @@ int scat(std::string a, std::string b) { return (int)(a.size() + b.size()); }
     b.add("[jit] p.x=" + m.get("p.x") + " arr[1]=" + m.get("arr[1]") + "\n");
 
     var man = Jit.compile("peprobe", "int sq(int v) { return v * v; }\n", {loader: "manual"});
-    var mapped = man.pe != null && man.pe.manual;
+    var mapped = man.image != null && man.image.manual;
     b.add("[jit] manual ok=" + man.ok + " mapped=" + mapped + " sq(9)=" + (man.ok ? m2s(man.callAuto("sq", [9])) : "n/a") + "\n");
-    if (mapped) b.add("[jit] pe sections=" + man.pe.sections.length + " reloc=" + man.pe.relocCount + " rebased=" + man.pe.rebased + " imports=" + man.pe.imports.join("+") + "\n");
+    if (mapped) b.add("[jit] image sections=" + man.image.sections.length + " reloc=" + man.image.relocCount + " rebased=" + man.image.rebased + " imports=" + man.image.imports.join("+") + "\n");
     if (man.ok) {
       Jit.dispose("peprobe");
       for (i in 0...5) Jit.tick();
-      b.add("[jit] manual unloaded images=" + JitPe.count() + "\n");
+      b.add("[jit] manual unloaded images=" + JitLoader.count() + "\n");
     }
     return b.toString();
   }

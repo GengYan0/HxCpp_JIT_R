@@ -1,7 +1,7 @@
 package hxcpp_jit_r;
 
 import hxcpp_jit_r.JitCompiler.JitDiag;
-import hxcpp_jit_r.JitPe.PeImage;
+import hxcpp_jit_r.JitLoader.JitImage;
 import hxcpp_jit_r.JitScan.JitFnInfo;
 import hxcpp_jit_r.JitScan.JitVarInfo;
 import hxcpp_jit_r.JitScan.JitStructInfo;
@@ -19,7 +19,7 @@ class JitModule {
   public var ms:Float = 0.0;
   public var cached:Bool = false;
   public var calls:Int = 0;
-  public var pe:PeImage = null;
+  public var image:JitImage = null;
 
   var handle:cpp.SizeT = 0;
   var ctx:cpp.SizeT = 0;
@@ -40,7 +40,7 @@ class JitModule {
   }
 
   public function resolve(n:String):cpp.SizeT {
-    if (pe != null) return JitPe.proc(pe, n);
+    if (image != null) return JitLoader.proc(image, n);
     if (handle == 0) return 0;
     return JitNative.getProc(handle, n);
   }
@@ -332,8 +332,8 @@ class JitModule {
     if (d != 0) JitNative.invoke(d, ctx, 0, 0, 0, 0, 0, 0, 0);
     JitHost.remove(id);
     if (ctx != 0) JitNative.freeCtx(ctx);
-    Jit.retire(handle, pe);
-    pe = null;
+    Jit.retire(handle, image);
+    image = null;
     handle = 0;
     ctx = 0;
     index = new Map();
