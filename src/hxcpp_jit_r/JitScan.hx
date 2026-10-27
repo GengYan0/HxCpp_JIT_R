@@ -303,7 +303,7 @@ class JitScan {
             structName = st.name;
             size = sz;
           } else {
-            if (c == "v" || c == "p" || c == "s" || c == "S") continue;
+            if (c == "v" || c == "?") continue;
             kind = "array";
             elem = c;
             size = sz;

@@ -323,6 +323,7 @@ class JitModule {
       case "l": 8;
       case "f": 4;
       case "d": 8;
+      case "p", "s", "S": 8;
       default: 4;
     }
   }

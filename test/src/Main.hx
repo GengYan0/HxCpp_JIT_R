@@ -879,6 +879,20 @@ void retitle() { title = "hot"; }
     eq("string global seen natively", sg.str("title"), "hot");
     eq("char pointer global", sg.str("label"), "ready");
 
+    head("pointer arrays");
+    var pa = Jit.compile("ptrarr", '
+int a = 7; int b = 8;
+int* slots[4];
+void wire() { slots[0] = &a; slots[1] = &b; }
+');
+    ok("pointer array compiles", pa.ok, pa.diag.length > 0 ? JitCompiler.describe(pa.diag[0]) : "");
+    pa.callAuto("wire", []);
+    eq("pointer array read", Std.string(new JitPtr(pa.get("slots[1]")).readI32()), "8");
+    ok("pointer array write", pa.set("slots[2]", pa.get("&a")), "");
+    eq("pointer array written", Std.string(new JitPtr(pa.get("slots[2]")).readI32()), "7");
+    eq("pointer array elem size", Std.string(pa.elemSize("slots")), "8");
+    eq("numeric array still works", Std.string(pa.get("slots[3]")), "0");
+
     head("throughput");
     var pm = Jit.compile("perf", "RJIT(mix) { double s = 0; for (int i = 0; i < 8; i++) s += (double)i * RJIT_A0; return s; }\n");
     var reps = 500000;

@@ -4,9 +4,9 @@
   "license": "MIT",
   "tags": ["cpp", "jit", "native", "windows", "msvc", "runtime", "hot-reload"],
   "description": "Compile and call native C++ from a hxcpp application at runtime.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "classPath": "src",
-  "releasenote": "beta: std::string and const char* globals",
+  "releasenote": "beta: pointer arrays",
   "contributors": ["GengYan0"],
   "dependencies": {}
 }

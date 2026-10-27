@@ -1,6 +1,6 @@
 # HxCpp_JIT_R
 
-0.1.1
+0.1.2
 
 Compile and call native C++ while your application is running. Hand it a source string, get a module back, call its functions like any Haxe method.
 
@@ -15,7 +15,7 @@ Behind the call the source goes into a cache directory, is compiled into a share
 - Automatic signature scanning: plain C++ functions are callable without writing macros
 - `const char*` and `std::string` parameters over a dedicated UTF-8 slot table
 - `std::string` results read back with `callStr`
-- Pointer variables: read, write, repoint, and `&name` for the address
+- Pointer variables and pointer arrays: read, write, repoint, and `&name` for the address
 - Pointer, `const char*` and `std::string` members of structs, and `std::string` / `const char*` globals, read with `str()` and written with `setStr()`
 - Struct, scalar and string reference parameters, struct results by value read through a handle, and exceptions trapped at the boundary
 - `const char*` results read straight back by `callStr`
@@ -813,7 +813,7 @@ Time goes into compiler process startup and linking, not into the amount of code
 
 ## Testing
 
-`test/` is a standalone console project with 369 assertions.
+`test/` is a standalone console project with 375 assertions.
 
 ```
 cd test

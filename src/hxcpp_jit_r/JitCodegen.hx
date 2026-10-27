@@ -11,7 +11,7 @@ typedef JitLeaf = {
 }
 
 class JitCodegen {
-  public static inline var BUILD:Int = 18;
+  public static inline var BUILD:Int = 19;
   public static inline var MAX_DEPTH:Int = 3;
 
   public static function emit(fns:Array<JitFnInfo>, vars:Array<JitVarInfo>, extra:Array<String> = null, structs:Array<JitStructInfo> = null, externs:Array<String> = null):String {
@@ -83,12 +83,12 @@ class JitCodegen {
         b.add('extern "C" RJIT_API double rjit_geta_' + v.name + '(RJitCtx* ctx, RJitArgs* args) {\n'
           + '  int i = (int)args->a[0];\n'
           + '  if (i < 0 || i >= ' + v.size + ') return 0.0;\n'
-          + '  return (double)' + v.name + '[i];\n}\n');
+          + '  return ' + getExpr(v.elem, v.name + '[i]') + ';\n}\n');
         if (!v.isConst) b.add('extern "C" RJIT_API double rjit_seta_' + v.name + '(RJitCtx* ctx, RJitArgs* args) {\n'
           + '  int i = (int)args->a[0];\n'
           + '  if (i < 0 || i >= ' + v.size + ') return 0.0;\n'
-          + '  ' + v.name + '[i] = (' + v.type + ')args->a[1];\n'
-          + '  return (double)' + v.name + '[i];\n}\n');
+          + '  ' + v.name + '[i] = ' + (v.elem == "p" || v.elem == "s" ? '(' + v.type + ')(size_t)args->a[1]' : '(' + v.type + ')args->a[1]') + ';\n'
+          + '  return ' + getExpr(v.elem, v.name + '[i]') + ';\n}\n');
       } else if (v.kind == "struct") {
         var st = stMap.get(v.structName);
         if (st == null) continue;
