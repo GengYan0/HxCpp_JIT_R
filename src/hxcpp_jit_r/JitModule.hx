@@ -824,6 +824,20 @@ class JitModule {
     if (p == null) return "";
     var info = vars.get(p.base);
     if (info == null) return "";
+    if (p.segs.length == 0) {
+      if (info.kind == "sstr") {
+        var fp0 = resolve("rjit_gets_" + p.base);
+        if (fp0 == 0) return "";
+        JitHost.clearRet(id);
+        guard(JitNative.invoke(fp0, ctx, 0, 0, 0, 0, 0, 0, 0), "str", p.base);
+        return JitHost.takeRet(id);
+      }
+      if (info.kind == "ptr" && info.type.indexOf("char") >= 0) {
+        var a0 = getVar(p.base);
+        return a0 == 0 ? "" : JitNative.readCStr(JitNative.toSizeT(a0));
+      }
+      return "";
+    }
     var fields:Array<String> = [];
     var idx = -1;
     for (q in p.segs) {
@@ -855,6 +869,12 @@ class JitModule {
     if (p == null || val == null) return false;
     var info = vars.get(p.base);
     if (info == null || info.isConst) return false;
+    if (p.segs.length == 0) {
+      if (info.kind != "sstr") return false;
+      var f0 = resolve("rjit_sets_" + p.base);
+      if (f0 == 0) return false;
+      return JitNative.invokeB(f0, ctx, 0, 0, 0, 0, 0, 0, 0, haxe.io.Bytes.ofString(val), null, null, null) == 0.0;
+    }
     var fields:Array<String> = [];
     var idx = -1;
     for (q in p.segs) {

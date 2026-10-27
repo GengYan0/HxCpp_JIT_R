@@ -863,6 +863,22 @@ double alive() { return counter + hits[1]; }
     ok("tls resolver address", JitNative.tlsAddr() != 0, "");
     eq("tls block is per thread copy", Std.string(JitNative.tlsBlock(tid) == tblock), "true");
 
+    head("string globals");
+    var sg = Jit.compile("strglob", '
+#include <string>
+std::string title = "boot";
+const char* label = "ready";
+void retitle() { title = "hot"; }
+');
+    ok("string globals compile", sg.ok, sg.diag.length > 0 ? JitCompiler.describe(sg.diag[0]) : "");
+    eq("string global kind", sg.kindOf("title"), "sstr");
+    eq("string global read", sg.str("title"), "boot");
+    ok("string global write", sg.setStr("title", "run"), "");
+    eq("string global written", sg.str("title"), "run");
+    sg.callAuto("retitle", []);
+    eq("string global seen natively", sg.str("title"), "hot");
+    eq("char pointer global", sg.str("label"), "ready");
+
     head("throughput");
     var pm = Jit.compile("perf", "RJIT(mix) { double s = 0; for (int i = 0; i < 8; i++) s += (double)i * RJIT_A0; return s; }\n");
     var reps = 500000;

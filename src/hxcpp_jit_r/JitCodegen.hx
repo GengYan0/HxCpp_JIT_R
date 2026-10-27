@@ -11,7 +11,7 @@ typedef JitLeaf = {
 }
 
 class JitCodegen {
-  public static inline var BUILD:Int = 13;
+  public static inline var BUILD:Int = 18;
   public static inline var MAX_DEPTH:Int = 3;
 
   public static function emit(fns:Array<JitFnInfo>, vars:Array<JitVarInfo>, extra:Array<String> = null, structs:Array<JitStructInfo> = null, externs:Array<String> = null):String {
@@ -140,6 +140,10 @@ class JitCodegen {
             + '  ' + acc + ' = ' + setExpr(l.type, acc) + ';\n'
             + '  return ' + getExpr(l.type, acc) + ';\n}\n');
         }
+      } else if (v.kind == "sstr") {
+        needString = true;
+        b.add('extern "C" RJIT_API double rjit_gets_' + v.name + '(RJitCtx* ctx, RJitArgs* args) {\n  RJIT_RETSTRN(' + v.name + '.c_str(), (int)' + v.name + '.size());\n  return 0.0;\n}\n');
+        if (!v.isConst) b.add('extern "C" RJIT_API double rjit_sets_' + v.name + '(RJitCtx* ctx, RJitArgs* args) {\n  ' + v.name + '.assign(args->s[0] != 0 ? args->s[0] : "", args->s[0] != 0 ? (size_t)args->sl[0] : (size_t)0);\n  return 0.0;\n}\n');
       } else if (v.kind == "ptr") {
         b.add('extern "C" RJIT_API double rjit_addrv_' + v.name + '(RJitCtx* ctx, RJitArgs* args) { return (double)(size_t)(void*)&' + v.name + '; }\n');
         b.add('extern "C" RJIT_API double rjit_getv_' + v.name + '(RJitCtx* ctx, RJitArgs* args) { return (double)(size_t)(void*)(' + v.name + '); }\n');

@@ -314,6 +314,8 @@ class JitScan {
             kind = "num";
           } else if (isPointerType(type)) {
             kind = "ptr";
+          } else if (code(type) == "S") {
+            kind = "sstr";
           } else {
             var st = sts.get(StringTools.trim(type));
             if (st == null) continue;
