@@ -4,9 +4,9 @@
   "license": "MIT",
   "tags": ["cpp", "jit", "native", "windows", "msvc", "runtime", "hot-reload"],
   "description": "Compile and call native C++ from a hxcpp application at runtime.",
-  "version": "0.0.20",
+  "version": "0.1.0",
   "classPath": "src",
-  "releasenote": "beta: dual string results, loader fallback for thread-pointer TLS, thread local cleanup, overload tie detection",
+  "releasenote": "first stable release: 362 assertions, stable ABI 8, Windows and Linux paths",
   "contributors": ["GengYan0"],
   "dependencies": {}
 }
