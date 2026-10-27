@@ -1,6 +1,6 @@
 # HxCpp_JIT_R
 
-0.1.5
+0.1.6
 
 Compile and call native C++ while your application is running. Hand it a source string, get a module back, call its functions like any Haxe method.
 
@@ -813,7 +813,7 @@ Time goes into compiler process startup and linking, not into the amount of code
 
 ## Testing
 
-`test/` is a standalone console project with 384 assertions.
+`test/` is a standalone console project with 378 assertions.
 
 ```
 cd test

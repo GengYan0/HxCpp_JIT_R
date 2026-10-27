@@ -890,10 +890,10 @@ void wire() { slots[0] = &a; slots[1] = &b; }
 ');
     ok("pointer array compiles", pa.ok, pa.diag.length > 0 ? JitCompiler.describe(pa.diag[0]) : "");
     pa.callAuto("wire", []);
-    eq("pointer array read", Std.string(new JitPtr(pa.get("slots[1]")).readI32()), "8");
-    ok("pointer array write", pa.set("slots[2]", pa.get("&a")), "");
-    eq("pointer array written", Std.string(new JitPtr(pa.get("slots[2]")).readI32()), "7");
-    eq("pointer array elem size", Std.string(pa.elemSize("slots")), "8");
+    var pv = Std.string(new JitPtr(pa.get("slots[1]")).readI32());
+    var pw = pa.set("slots[2]", pa.get("&a"));
+    eq("pointer array round trip", pv + "/" + Std.string(new JitPtr(pa.get("slots[2]")).readI32()) + "/" + Std.string(pa.elemSize("slots")), "8/7/8");
+    ok("pointer array writes", pw, "");
     eq("numeric array still works", Std.string(pa.get("slots[3]")), "0");
 
     head("array members");
@@ -905,13 +905,11 @@ void fill() { g.row[0] = 1; g.row[1] = 2; g.row[2] = 3; gs[1].row[2] = 9; }
 ');
     ok("array member compiles", am2.ok, am2.diag.length > 0 ? JitCompiler.describe(am2.diag[0]) : "");
     am2.callAuto("fill", []);
-    eq("member array read", Std.string(am2.get("g.row[1]")), "2");
-    ok("member array write", am2.set("g.row[0]", 5), "");
-    eq("member array written", Std.string(am2.get("g.row[0]")), "5");
-    eq("member array out of range", Std.string(am2.get("g.row[7]")), "0");
-    eq("element array member", Std.string(am2.get("gs[1].row[2]")), "9");
-    ok("element array member write", am2.set("gs[0].row[1]", 4), "");
-    eq("element array member written", Std.string(am2.get("gs[0].row[1]")), "4");
+    var mw = am2.set("g.row[0]", 5);
+    var ew = am2.set("gs[0].row[1]", 4);
+    eq("member array round trip", Std.string(am2.get("g.row[1]")) + "/" + Std.string(am2.get("g.row[0]")) + "/" + Std.string(am2.get("g.row[7]")), "2/5/0");
+    eq("element array round trip", Std.string(am2.get("gs[1].row[2]")) + "/" + Std.string(am2.get("gs[0].row[1]")), "9/4");
+    ok("member array writes", mw && ew, "");
 
     head("throughput");
     var pm = Jit.compile("perf", "RJIT(mix) { double s = 0; for (int i = 0; i < 8; i++) s += (double)i * RJIT_A0; return s; }\n");
