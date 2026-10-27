@@ -54,6 +54,8 @@ static int rjit_guard_entry(void* entry, void* hinst, unsigned long reason, void
 }
 #endif
 
+static RJitHost* rjit_host_table = 0;
+
 struct RJitTlsDef { size_t size; const void* init; size_t initSize; };
 static RJitTlsDef rjit_tls_defs[32];
 static int rjit_tls_n = 0;
@@ -81,6 +83,10 @@ extern "C" void* rjit_tls_get(void* idx) {
     rjit_tls_holder.p[k] = b;
   }
   return (void*)((char*)b + off);
+}
+
+extern "C" __declspec(dllexport) double rjit_host_call(void* m, const char* n, int len, double a0, double a1, double a2, double a3) {
+  return rjit_host_table ? rjit_host_table->call(m, n, len, a0, a1, a2, a3) : 0.0;
 }
 
 static int rjit_tls_register(size_t size, const void* init, size_t initSize) {
@@ -162,6 +168,7 @@ class JitNative {
       table.retstr = [](void* m, const char* s, int len) { ::hxcpp_jit_r::JitNative_obj::onRetStr((int)(size_t)m, ::String::create(s, len)); };
       table.retstr2 = [](void* m, const char* s, int len) { ::hxcpp_jit_r::JitNative_obj::onRetStr2((int)(size_t)m, ::String::create(s, len)); };
       table.get = [](void* m, const char* k, int len) -> double { return ::hxcpp_jit_r::JitNative_obj::onGet((int)(size_t)m, ::String::create(k, len)); };
+      rjit_host_table = &table;
     }
     RJitCtx* c = (RJitCtx*)malloc(sizeof(RJitCtx));
     if (c == 0) return (size_t)0;

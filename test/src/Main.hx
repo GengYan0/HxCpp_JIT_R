@@ -911,6 +911,28 @@ void fill() { g.row[0] = 1; g.row[1] = 2; g.row[2] = 3; gs[1].row[2] = 9; }
     eq("element array round trip", Std.string(am2.get("gs[1].row[2]")) + "/" + Std.string(am2.get("gs[0].row[1]")), "9/4");
     ok("member array writes", mw && ew, "");
 
+    head("callbacks");
+    var pb = Jit.compile("cbprobe", '
+double probe(double (*f)(double), double v) { return v; }
+double probe2(double a, double v) { return v; }
+');
+    ok("probe compiles", pb.ok, pb.diag.length > 0 ? JitCompiler.describe(pb.diag[0]) : "");
+    eq("pointer param keeps second arg", Std.string(pb.callAuto("probe", [1.0, 9])), "9");
+    eq("numeric param keeps second arg", Std.string(pb.callAuto("probe2", [1.0, 9])), "9");
+    eq("probe sig", pb.signature("probe"), "d(pd)");
+    Jit.bind("half", function(a0:Float, a1:Float, a2:Float, a3:Float):Float return a0 * 0.5);
+    Jit.bind("plusone", function(a0:Float, a1:Float, a2:Float, a3:Float):Float return a0 + 1);
+    var cbm = Jit.compile("cbtake", '
+double apply1(double (*f)(double), double v) { return f(v); }
+double apply2(int (*f)(int), double v) { return (double)f((int)v); }
+');
+    ok("callback host compiles", cbm.ok, cbm.diag.length > 0 ? JitCompiler.describe(cbm.diag[0]) : "");
+    var fp1 = Jit.callback("half", "d(d)");
+    ok("callback pointer built", fp1 != 0, "");
+    eq("callback invoked", Std.string(cbm.callAuto("apply1", [fp1, 9])), "4.5");
+    var fp2 = Jit.callback("plusone", "i(i)");
+    eq("second callback invoked", Std.string(cbm.callAuto("apply2", [fp2, 41])), "42");
+
     head("throughput");
     var pm = Jit.compile("perf", "RJIT(mix) { double s = 0; for (int i = 0; i < 8; i++) s += (double)i * RJIT_A0; return s; }\n");
     var reps = 500000;

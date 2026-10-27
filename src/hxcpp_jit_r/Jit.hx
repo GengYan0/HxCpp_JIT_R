@@ -263,6 +263,61 @@ class Jit {
     return m;
   }
 
+  static var cbCache:Map<String, Float> = new Map();
+
+  public static function callback(name:String, shape:String = "d(d)"):Float {
+    ensure();
+    var key = name + "|" + shape;
+    var hit = cbCache.get(key);
+    if (hit != null) return hit;
+    var l = shape.indexOf("(");
+    var r = shape.indexOf(")", l < 0 ? 0 : l);
+    if (l < 0 || r < 0) return 0;
+    var ret = switch (StringTools.trim(shape.substr(0, l))) {
+      case "d": "double";
+      case "i": "int";
+      case "f": "float";
+      case "v": "void";
+      default: null;
+    };
+    if (ret == null) return 0;
+    var ps:Array<String> = [];
+    var vs:Array<String> = [];
+    for (k in StringTools.trim(shape.substring(l + 1, r)).split(",")) {
+      var c = StringTools.trim(k);
+      var ty = switch (c) {
+        case "d": "double";
+        case "i": "int";
+        case "f": "float";
+        case "p": "const void*";
+        default: null;
+      };
+      if (ty == null) return 0;
+      ps.push(ty + " a" + ps.length);
+      vs.push(c == "p" ? "(double)(size_t)a" + (ps.length - 1) : "(double)a" + (ps.length - 1));
+    }
+    while (vs.length < 4) vs.push("0.0");
+    var body = ret == "void"
+      ? "(void)f((void*)0, \"" + name + "\", (int)strlen(\"" + name + "\"), " + vs.join(", ") + ");"
+      : "return (" + ret + ")f((void*)0, \"" + name + "\", (int)strlen(\"" + name + "\"), " + vs.join(", ") + ");";
+    var src = '#include <windows.h>\n'
+      + "typedef double (*RJitHC)(void*, const char*, int, double, double, double, double);\n"
+      + "static RJitHC rjit_hc = 0;\n"
+      + 'extern "C" RJIT_API ' + ret + " rjit_cb(" + ps.join(", ") + ") {\n"
+      + "  if (!rjit_hc) rjit_hc = (RJitHC)GetProcAddress(GetModuleHandleA(0), \"rjit_host_call\");\n"
+      + "  RJitHC f = rjit_hc;\n"
+      + "  if (!f) return (" + ret + ")0;\n"
+      + "  " + body + "\n}\n";
+    var m = compile("rjitcb_" + name + "_" + new EReg("[^A-Za-z0-9]", "g").replace(shape, "_"), src);
+    if (!m.ok) {
+      log("[jit] callback compile failed: " + (m.diag.length > 0 ? JitCompiler.describe(m.diag[0]) : "no diag"));
+      return 0;
+    }
+    var a = JitNative.toFloat(m.resolve("rjit_cb"));
+    if (a != 0) cbCache.set(key, a);
+    return a;
+  }
+
   public static function compileAsync(name:String, src:String, cb:Null<JitModule>->Void, ?o:JitOptions):Void {
     ensure();
     if (!ready) {

@@ -208,8 +208,16 @@ class JitScan {
       if (s.indexOf("(") < 0 || s.indexOf(")") < 0) continue;
       if (s.indexOf("{") < 0) continue;
       var p = s.indexOf("(");
-      var q = s.indexOf(")", p);
-      if (q < 0) continue;
+      var q = p + 1;
+      var dep = 1;
+      while (q < s.length && dep > 0) {
+        var ch = s.charCodeAt(q);
+        if (ch == 40) dep++;
+        else if (ch == 41) dep--;
+        q++;
+      }
+      if (dep != 0) continue;
+      q--;
       var before = StringTools.trim(s.substr(0, p));
       if (before == "" || before.indexOf("=") >= 0 || before.indexOf(".") >= 0) continue;
       var sp = lastSpace(before);
@@ -485,6 +493,10 @@ class JitScan {
           x = StringTools.trim(x.substr(0, i));
           break;
         }
+      }
+      if (x.indexOf("(*") >= 0) {
+        res.push({type: "void*", def: def});
+        continue;
       }
       var sp = lastSpace(x);
       res.push({type: sp < 0 ? x : StringTools.trim(x.substr(0, sp)), def: def});
