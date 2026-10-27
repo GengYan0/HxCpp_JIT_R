@@ -555,6 +555,9 @@ class JitNative {
   @:functionCode('((void(*)(int,void*,void*))(size_t)f)(0, 0, 0); return 0.0;')
   public static function callInit(f:cpp.SizeT):Float return 0;
 
+  @:functionCode('return (size_t)((void*(*)())(size_t)f)();')
+  public static function callPtr0(f:cpp.SizeT):cpp.SizeT return 0;
+
   @:functionCode('return (size_t)&rjit_tls_get;')
   public static function tlsAddr():cpp.SizeT return 0;
 

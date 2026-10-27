@@ -480,9 +480,12 @@ class JitElf {
       var shndx = Std.int(mpeek(JitNative.toSizeT(JitNative.toFloat(symE) + 6), 2));
       var value = mpeek(JitNative.toSizeT(JitNative.toFloat(symE) + 8), 8);
       var name = nameOff == 0 ? "" : readMemStr(memAt(baseF, strtab + nameOff));
+      var stInfo = Std.int(mpeek(JitNative.toSizeT(JitNative.toFloat(symE) + 4), 1));
+      var isIfunc = (stInfo & 0x0F) == 10;
       var sVal = 0.0;
       if (shndx != 0 && value != 0) {
         sVal = baseF + value;
+        if (isIfunc) sVal = JitNative.toFloat(JitNative.callPtr0(JitNative.toSizeT(sVal)));
       } else if (name != "") {
         sVal = name == "__tls_get_addr"
           ? JitNative.toFloat(JitNative.tlsAddr())
