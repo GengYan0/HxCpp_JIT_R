@@ -1,6 +1,6 @@
 # HxCpp_JIT_R
 
-Beta 0.0.17
+Beta 0.0.18
 
 Compile and call native C++ while your application is running. Hand it a source string, get a module back, call its functions like any Haxe method.
 
@@ -16,13 +16,13 @@ Behind the call the source goes into a cache directory, is compiled into a share
 - `const char*` and `std::string` parameters over a dedicated UTF-8 slot table
 - `std::string` results read back with `callStr`
 - Pointer variables: read, write, repoint, and `&name` for the address
-- Pointer and `const char*` members of structs, walked with `JitPtr` and decoded with `str()`
-- Struct parameters by value or by `const T&`, and struct results by value read through a handle
+- Pointer, `const char*` and `std::string` members of structs, read with `str()` and written with `setStr()`
+- Struct and scalar reference parameters, and struct results by value read through a handle
 - `const char*` results read straight back by `callStr`
 - Zero-compile reads and writes for globals, struct fields and array elements
 - Handles resolved once at load, so the call path never reaches the symbol table
 - Struct arrays and nested fields: `pts[2].x`, `box.pos.x`, any depth up to three
-- Expression evaluation against live module state: `m.expr("p.x + p.y")`
+- Expression evaluation against live module state: `m.expr("p.x + p.y")`, including bitwise operators and string values
 - Bound handles: `m.bind(name)` resolves the symbol and signature once, then calls at 0.015 us
 - Multiple translation units per module with local `#include` search paths, including their globals
 - Bulk array transfer for large buffers (`readDoubles`, `writeDoubles`, `readRaw`, `writeRaw`)
@@ -187,7 +187,9 @@ The standard library, inline assembly, SIMD intrinsics and templates all work. T
 | `bind(name, ?sig):JitFn` | Resolve the symbol once, then call through the handle |
 | `expr(code):Float` | Evaluate an expression against live module state |
 | `get(path)` / `set(path, v)` | `"n"`, `"&n"`, `"p.x"`, `"arr[2]"`, `"pts[2].x"`, `"box.pos.x"` |
-| `str(path)` | Read a `const char*` member at the address the path holds |
+| `str(path)` | Read a `const char*` or `std::string` member |
+| `setStr(path, value)` | Write a `std::string` member |
+| `expr(code)` / `exprStr(code)` | Evaluate a numeric or string expression against live state |
 | `callStruct(name, args):JitPtr` | Call a function that returns a struct by value |
 | `addrOf(name)` | Address of a variable |
 | `getVar` / `setVar` | Top-level numeric and pointer variables |
@@ -393,6 +395,26 @@ m.callAuto("len3", [m.get("&gv")]);   // reads gv
 m.callAuto("bump", [m.get("&gv")]);   // writes gv
 ```
 
+Scalars and strings work the same way:
+
+```haxe
+struct Rec { std::string name; double score; };
+Rec item;
+int counter = 21;
+void bump(int& x) { x = x + 1; }
+double doubled(const int& x) { return x * 2; }
+double namelen(const std::string& s) { return (double)s.size(); }
+
+m.callAuto("bump", [m.get("&counter")]);     // writes counter
+m.callAuto("doubled", [m.get("&counter")]);  // 44
+m.callAuto("namelen", [], ["hello"]);        // 5
+
+m.setStr("item.name", "alpha");
+m.str("item.name");                          // "alpha"
+```
+
+`std::string` members are copied through the string slot, so the returned text stays valid after the call.
+
 ### Expressions
 
 ```haxe
@@ -409,7 +431,24 @@ m.expr("speed > 10 ? 1 : 0");      // 1
 m.get("ax + ay");                  // 7, paths and expressions share one entry point
 ```
 
-Operators: `+ - * / % ^`, comparisons, `&& || !`, ternary. Functions: `abs sqrt floor ceil round trunc sign min max pow sin cos tan asin acos atan atan2 exp log log2 log10 hypot mod clamp lerp deg rad`. Constants: `pi`, `e`. Unknown names evaluate to `NaN` instead of throwing.
+Operators: `+ - * / %`, `& | ^ << >> ~`, comparisons, `&& || !`, ternary. Functions: `abs sqrt floor ceil round trunc sign min max pow sin cos tan asin acos atan atan2 exp log log2 log10 hypot mod clamp lerp deg rad`. Constants: `pi`, `e`. Unknown names evaluate to `NaN` instead of throwing.
+
+Strings are values too, so comparisons and concatenation work against string members:
+
+```haxe
+struct Bag { std::string label; int mask; };
+Bag bag;
+
+m.setStr("bag.label", "hello");
+m.exprStr("bag.label");                 // "hello"
+m.exprStr('bag.label + " world"');      // "hello world"
+m.expr('bag.label == "hello"');         // 1
+m.expr("strlen(bag.label)");            // 5
+m.exprStr("upper(bag.label)");          // "HELLO"
+m.exprStr('"a" + 1 + "b"');             // "a1b"
+```
+
+String functions: `strlen str upper lower contains`. `+` concatenates when either side is a string.
 
 Evaluation reads the live module state through the generated accessors, so no compilation happens per expression.
 
@@ -720,24 +759,25 @@ Time goes into compiler process startup and linking, not into the amount of code
 
 - Up to six numeric and four string arguments per call
 - Return values are numeric or `void`; pointers come back as addresses and `std::string` results go through `callStr`
-- Struct results by value land in a per function buffer that the next call to that function overwrites; copy it out before calling again
+- Struct results by value land in a ring of eight per function and per thread, so the last eight results stay readable
 - C++ default arguments are not filled in
-- Overloads resolve to the first match; use `callSig` for the others
+- Overloads resolve by argument count; same-count overloads need `callSig`
 - Every guarded call costs an indirect jump; `callFast` removes the SEH guard but also removes crash containment
 - Compilation needs a local compiler; target machines fall back to the cache
 - SEH catches hardware exceptions only; C++ exceptions across the boundary are undefined
 - Build timeout terminates the compiler process
-- Struct accessors cover leaf fields up to three levels of nesting, including pointer and `const char*` members; `std::string` members need a helper function
+- Struct accessors cover leaf fields up to three levels of nesting, including pointer, `const char*` and `std::string` members
 - Manual mapping handles PE on Windows and ELF64 on Linux; other formats use the system loader
 - Globals in secondary units are exposed, but a struct-typed one needs the struct declared in the main unit
-- ELF manual mapping does not process thread-local storage; the system loader does
+- ELF manual mapping refuses images that declare thread-local storage and reports it; `loader: "auto"` then falls back to the system loader
+- Reference parameters are supported for scalars, structs and `const std::string&`; other reference types need a wrapper
 - Changing the ABI header layout requires clearing the host precompiled header and rebuilding
 
 ---
 
 ## Testing
 
-`test/` is a standalone console project with 308 assertions.
+`test/` is a standalone console project with 340 assertions.
 
 ```
 cd test
@@ -745,7 +785,7 @@ haxe build.hxml
 bin/Main.exe
 ```
 
-Covers: core calls, diagnostic line numbers, expression offset, automatic signatures, string arguments, string and `RJIT_RETSTR` results, struct and array access, struct arrays and nested fields, pointer and string members, expressions, bound handles, overlapping signatures, struct parameters by value and by reference, struct results by value, multiple translation units and their globals, pointer variables and address-of, bulk transfer, session state including struct arrays, crash isolation and error callback, pointer handle, overload dispatch, concurrency gate, hot reload, file watch, large source, cache hit, cache packaging and import, compiler-less mode, manual mapping and unload, ELF header parsing, call throughput.
+Covers: core calls, diagnostic line numbers, expression offset, automatic signatures, string arguments, string and `RJIT_RETSTR` results, struct and array access, struct arrays and nested fields, pointer and string members, expressions, bound handles, overlapping signatures, scalar and struct reference parameters, std::string members, bitwise and string expressions, struct result ring, ELF thread-local detection, packed relocations and their globals, pointer variables and address-of, bulk transfer, session state including struct arrays, crash isolation and error callback, pointer handle, overload dispatch, concurrency gate, hot reload, file watch, large source, cache hit, cache packaging and import, compiler-less mode, manual mapping and unload, ELF header parsing, call throughput.
 
 Linux:
 

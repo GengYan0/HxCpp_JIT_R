@@ -622,9 +622,35 @@ void bump(Vec2& v) { v.x = v.x + 10; }
     eq("struct return x", Std.string(rv.readF64(0)), "5");
     eq("struct return y", Std.string(rv.readF64(8)), "6");
     eq("struct return through callAuto", Std.string(bv.callAuto("mk", [7, 8]) != 0), "true");
+    var ring1 = bv.callStruct("mk", [11, 12]);
+    var ring2 = bv.callStruct("mk", [21, 22]);
+    eq("ring keeps earlier result", Std.string(ring1.readF64(0)), "11");
+    eq("ring keeps later result", Std.string(ring2.readF64(8)), "22");
     eq("struct return second field", Std.string(new JitPtr(bv.callAuto("mk", [9, 10])).readF64(8)), "10");
     eq("const reference parameter", Std.string(bv.callAuto("len3", [bv.get("&gv")])), "13");
     ok("mutable reference parameter", bv.callAuto("bump", [bv.get("&gv")]) == 0 && bv.get("gv.x") == 13, "");
+
+    head("references and string members");
+    var rf = Jit.compile("refs", '
+struct Rec { std::string name; double score; };
+Rec item;
+int counter = 21;
+void bump(int& x) { x = x + 1; }
+double doubled(const int& x) { return x * 2; }
+double namelen(const std::string& s) { return (double)s.size(); }
+void rename(const std::string& s) { item.name = s; }
+');
+    ok("references module compiles", rf.ok, rf.diag.length > 0 ? JitCompiler.describe(rf.diag[0]) : "");
+    rf.set("counter", 21);
+    ok("scalar reference write", rf.callAuto("bump", [rf.get("&counter")]) == 0 && rf.get("counter") == 22, "");
+    eq("const scalar reference", Std.string(rf.callAuto("doubled", [rf.get("&counter")])), "44");
+    eq("const string reference", Std.string(rf.callAuto("namelen", [], ["hello"])), "5");
+    ok("string member write", rf.setStr("item.name", "alpha"), "");
+    eq("string member read", rf.str("item.name"), "alpha");
+    rf.callAuto("rename", [], ["beta"]);
+    eq("string member seen natively", rf.str("item.name"), "beta");
+    eq("string member length", Std.string(rf.callAuto("namelen", [0], [rf.str("item.name")])), "4");
+    ok("string member rejects missing", !rf.setStr("item.nosuch", "x"), "");
 
     head("expressions");
     var ex = Jit.compile("exprm", "
@@ -650,6 +676,28 @@ double base = 2;
     eq("expr calls module function", Std.string(ef.expr("scale(3, 4)")), "12");
     eq("expr mixes function and variable", Std.string(ef.expr("scale(base, 2) + 1")), "5");
     ok("expr unknown function is nan", ef.expr("nosuch(1)") != ef.expr("nosuch(1)"), "");
+
+    var ebx = Jit.compile("exprbits", '
+struct Bag { std::string label; int mask; };
+Bag bag;
+');
+    ok("bits module compiles", ebx.ok, ebx.diag.length > 0 ? JitCompiler.describe(ebx.diag[0]) : "");
+    ebx.set("bag.mask", 12);
+    eq("bit and", Std.string(ebx.expr("bag.mask & 10")), "8");
+    eq("bit or", Std.string(ebx.expr("bag.mask | 3")), "15");
+    eq("bit xor", Std.string(ebx.expr("bag.mask ^ 12")), "0");
+    eq("shift left", Std.string(ebx.expr("1 << 4")), "16");
+    eq("shift right", Std.string(ebx.expr("256 >> 3")), "32");
+    eq("bit not", Std.string(ebx.expr("~0")), "-1");
+    ok("string member write", ebx.setStr("bag.label", "hello"), "");
+    eq("string expression", ebx.exprStr("bag.label"), "hello");
+    eq("string concat", ebx.exprStr('bag.label + " world"'), "hello world");
+    eq("string compare", Std.string(ebx.expr('bag.label == "hello"')), "1");
+    eq("string length function", Std.string(ebx.expr("strlen(bag.label)")), "5");
+    eq("string upper function", ebx.exprStr("upper(bag.label)"), "HELLO");
+    eq("string literal compare", Std.string(ebx.expr('"x" == "x"')), "1");
+    eq("mixed concat", ebx.exprStr('"a" + 1 + "b"'), "a1b");
+    eq("string not found", ebx.exprStr('"abc" == "abd"'), "0");
 
     var ov = Jit.compile("overloads", "double pick1(double v) { return v + 1; }
 double pick1(double a, double b) { return a * b; }
@@ -733,6 +781,35 @@ double alive() { return counter + hits[1]; }
     eq("elf load memsz", Std.string(Std.int(ei.phdrs[0].memsz)), "8192");
     ok("elf rejects short input", !JitElf.parse(haxe.io.Bytes.alloc(8)).ok, "");
     ok("elf manual map reports platform", !JitElf.load(mdir + "/extra.cpp").ok, "");
+    ok("elf without tls", !JitElf.tls(ei), "");
+    var tb = haxe.io.Bytes.alloc(64 + 112);
+    tb.set(0, 0x7F);
+    tb.set(1, 0x45);
+    tb.set(2, 0x4C);
+    tb.set(3, 0x46);
+    tb.set(4, 2);
+    tb.set(5, 1);
+    tb.setUInt16(16, 3);
+    tb.setUInt16(18, 0x3E);
+    tb.setInt32(32, 64);
+    tb.setUInt16(54, 56);
+    tb.setUInt16(56, 2);
+    tb.setInt32(64, 1);
+    tb.setInt32(64 + 32, 4096);
+    tb.setInt32(64 + 40, 8192);
+    tb.setInt32(120, 7);
+    tb.setInt32(120 + 32, 32);
+    tb.setInt32(120 + 40, 32);
+    var tinfo = JitElf.parse(tb);
+    ok("elf tls detected", tinfo.ok && JitElf.tls(tinfo), tinfo.error);
+    var rb = haxe.io.Bytes.alloc(24);
+    rb.setInt32(0, 0x1000);
+    rb.setInt32(8, 3);
+    rb.setInt32(16, 0x2000);
+    var tg = JitElf.relrTargets(rb, 0, 24);
+    eq("relr direct slot", Std.string(Std.int(tg[0])), "4096");
+    eq("relr bitmap slot", Std.string(Std.int(tg[1])), "4104");
+    eq("relr resumes", Std.string(Std.int(tg[2])), "8192");
 
     head("throughput");
     var pm = Jit.compile("perf", "RJIT(mix) { double s = 0; for (int i = 0; i < 8; i++) s += (double)i * RJIT_A0; return s; }\n");

@@ -5,6 +5,7 @@ import hxcpp_jit_r.JitLoader.JitImage;
 import hxcpp_jit_r.JitScan.JitFnInfo;
 import hxcpp_jit_r.JitScan.JitVarInfo;
 import hxcpp_jit_r.JitScan.JitStructInfo;
+import hxcpp_jit_r.JitExpr.JitValue;
 
 typedef JitSeg = {
   var field:Bool;
@@ -81,7 +82,7 @@ class JitModule {
 
   public function dispFor(f:JitFnInfo):cpp.SizeT {
     if (f == null) return 0;
-    if (f.args.indexOf("t") < 0) return dispOf(f.sig);
+    if (!JitCodegen.needsCustom(f)) return dispOf(f.sig);
     var k = "dn|" + f.name + "|" + f.sig;
     var v = pre.get(k);
     if (v != null) return JitNative.toSizeT(v);
@@ -418,13 +419,44 @@ class JitModule {
   }
 
   public function expr(e:String):Float {
-    return JitExpr.eval(e, function(n) {
-      var r = readPath(n);
-      return r == null ? Math.NaN : r;
-    }, function(n, args) {
-      if (!fns.exists(n)) return Math.NaN;
-      return callAuto(n, args);
-    });
+    return JitExpr.eval(e, pathNum, pathStr, callExpr);
+  }
+
+  public function exprStr(e:String):String {
+    return JitExpr.evalStr(e, pathNum, pathStr, callExpr);
+  }
+
+  function pathNum(n:String):Float {
+    var r = readPath(n);
+    return r == null ? Math.NaN : r;
+  }
+
+  function pathStr(n:String):String {
+    var p = parsePath(n);
+    if (p == null) return null;
+    var info = vars.get(p.base);
+    if (info == null) return null;
+    var fields:Array<String> = [];
+    for (q in p.segs) {
+      if (!q.field) return null;
+      fields.push(q.name);
+    }
+    if (fields.length == 0) return null;
+    var t = fieldType(info.structName, fields);
+    if (t != "S" && t != "s") return null;
+    return str(n);
+  }
+
+  function callExpr(n:String, args:Array<JitValue>):Null<JitValue> {
+    if (!fns.exists(n)) return null;
+    var nums:Array<Float> = [];
+    for (v in args) {
+      switch (v) {
+        case JNum(f): nums.push(f);
+        case JStr(_): return null;
+      }
+    }
+    return JNum(callAuto(n, nums));
   }
 
   public function set(path:String, val:Float):Bool {
@@ -555,7 +587,7 @@ class JitModule {
       var ss = 0;
       for (i in 0...a.length) {
         var c = a.charAt(i);
-        if (c == "s" || c == "S") ss++;
+        if (c == "s" || c == "S" || c == "R") ss++;
         else ns++;
       }
       if (ns == nums && ss == strs) return bySig.get(n + "|" + sg);
@@ -573,11 +605,15 @@ class JitModule {
     var d = dispFor(f);
     if (d == 0) return callA(n, args);
     calls++;
-    var r = f.sig.indexOf("s") >= 0 || f.sig.indexOf("S") >= 0
+    var r = usesStr(f.sig)
       ? JitNative.callViaB(d, fp, ctx, args.length, a(args, 0), a(args, 1), a(args, 2), a(args, 3), a(args, 4), a(args, 5),
           bytesOf(strs, 0), bytesOf(strs, 1), bytesOf(strs, 2), bytesOf(strs, 3))
       : JitNative.callVia(d, fp, ctx, args.length, a(args, 0), a(args, 1), a(args, 2), a(args, 3), a(args, 4), a(args, 5));
     return guard(r, "callAuto", n);
+  }
+
+  public static inline function usesStr(sig:String):Bool {
+    return sig.indexOf("s") >= 0 || sig.indexOf("S") >= 0 || sig.indexOf("R") >= 0;
   }
 
   static inline function a(v:Array<Float>, i:Int):Float {
@@ -646,7 +682,7 @@ class JitModule {
     var fp = ptrOf(n, sig);
     if (fp == 0) return 0.0;
     calls++;
-    var r = sig.indexOf("s") >= 0 || sig.indexOf("S") >= 0
+    var r = usesStr(sig)
       ? JitNative.callViaB(d, fp, ctx, args.length, a(args, 0), a(args, 1), a(args, 2), a(args, 3), a(args, 4), a(args, 5),
           bytesOf(strs, 0), bytesOf(strs, 1), bytesOf(strs, 2), bytesOf(strs, 3))
       : JitNative.callVia(d, fp, ctx, args.length, a(args, 0), a(args, 1), a(args, 2), a(args, 3), a(args, 4), a(args, 5));
@@ -699,9 +735,80 @@ class JitModule {
   }
 
   public function str(path:String):String {
+    var p = parsePath(path);
+    if (p == null) return "";
+    var info = vars.get(p.base);
+    if (info == null) return "";
+    var fields:Array<String> = [];
+    var idx = -1;
+    for (q in p.segs) {
+      if (q.field) fields.push(q.name);
+      else if (idx < 0 && fields.length == 0) idx = q.index;
+      else return "";
+    }
+    if (fields.length == 0) return "";
+    if (idx >= 0 && info.kind != "structarray") return "";
+    if (idx < 0 && info.kind != "struct") return "";
+    var key = p.base + "__" + fields.join("__");
+    if (fieldType(info.structName, fields) == "S") {
+      var fnp = resolve((idx >= 0 ? "rjit_getstra_" : "rjit_getstr_") + key);
+      if (fnp == 0) return "";
+      JitHost.clearRet(id);
+      var r = idx >= 0
+        ? JitNative.invoke(fnp, ctx, 1, idx, 0, 0, 0, 0, 0)
+        : JitNative.invoke(fnp, ctx, 0, 0, 0, 0, 0, 0, 0);
+      guard(r, "str", key);
+      return JitHost.takeRet(id);
+    }
     var v = get(path);
     if (v != v || v == 0) return "";
     return JitNative.readCStr(JitNative.toSizeT(v));
+  }
+
+  public function setStr(path:String, val:String):Bool {
+    var p = parsePath(path);
+    if (p == null || val == null) return false;
+    var info = vars.get(p.base);
+    if (info == null || info.isConst) return false;
+    var fields:Array<String> = [];
+    var idx = -1;
+    for (q in p.segs) {
+      if (q.field) fields.push(q.name);
+      else if (idx < 0 && fields.length == 0) idx = q.index;
+      else return false;
+    }
+    if (fields.length == 0) return false;
+    if (idx >= 0 && info.kind != "structarray") return false;
+    if (idx < 0 && info.kind != "struct") return false;
+    var key = p.base + "__" + fields.join("__");
+    if (fieldType(info.structName, fields) != "S") return false;
+    var fnp = resolve((idx >= 0 ? "rjit_setstra_" : "rjit_setstr_") + key);
+    if (fnp == 0) return false;
+    var b = haxe.io.Bytes.ofString(val);
+    var r = idx >= 0
+      ? JitNative.invokeB(fnp, ctx, 1, idx, 0, 0, 0, 0, 0, b, null, null, null)
+      : JitNative.invokeB(fnp, ctx, 0, 0, 0, 0, 0, 0, 0, b, null, null, null);
+    return guard(r, "setStr", key) == 0.0;
+  }
+
+  function fieldType(sname:String, path:Array<String>):String {
+    var cur = sname;
+    for (i in 0...path.length) {
+      var st = structs.get(cur);
+      if (st == null) return "";
+      var t = "";
+      var nx = "";
+      for (f in st.fields) {
+        if (f.name != path[i]) continue;
+        t = f.type;
+        nx = f.nested;
+      }
+      if (t == "") return "";
+      if (i == path.length - 1) return t;
+      if (nx == "") return "";
+      cur = nx;
+    }
+    return "";
   }
 
   public function bind(n:String, ?sig:String):JitFn {
@@ -710,7 +817,7 @@ class JitModule {
     if (s == null || handle == 0) return new JitFn(this, n, "", 0, 0, 0, false, false);
     var fp = ptrOf(n, s);
     var d = f != null && f.sig == s ? dispFor(f) : resolve(JitCodegen.dispName(s));
-    var needsStr = s.indexOf("s") >= 0 || s.indexOf("S") >= 0;
+    var needsStr = usesStr(s);
     return new JitFn(this, n, s, fp, d, ctx, needsStr, f != null && f.ret == "S");
   }
 

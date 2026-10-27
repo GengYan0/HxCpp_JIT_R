@@ -165,7 +165,7 @@ class JitScan {
           fields.push({name: fn, type: "struct", raw: ty, nested: tq});
           continue;
         }
-        if (c == "?" || c == "v" || c == "S") continue;
+        if (c == "?" || c == "v" || c == "R") continue;
         fields.push({name: fn, type: c, raw: ty, nested: ""});
       }
       if (fields.length > 0) out.push({name: d.name, fields: fields});
@@ -176,6 +176,7 @@ class JitScan {
   public static function functions(src:String, structs:Array<JitStructInfo> = null):Array<JitFnInfo> {
     var clean = strip(src);
     var kw = keywords();
+    var nums = numerics();
     var sts = new Map<String, Bool>();
     if (structs != null) for (st in structs) sts.set(st.name, true);
     var out:Array<JitFnInfo> = [];
@@ -210,9 +211,12 @@ class JitScan {
       for (t in rawArgs) {
         var c = code(t);
         if (c == "?") {
-          var bare = StringTools.trim(t);
+          var raw0 = StringTools.trim(t);
+          var bare = raw0;
           while (StringTools.endsWith(bare, "&")) bare = StringTools.trim(bare.substr(0, bare.length - 1));
-          if (sts.exists(trimQualifiers(bare))) c = "t";
+          var base = trimQualifiers(bare);
+          if (sts.exists(base)) c = "t";
+          else if (bare != raw0 && isNumeric(base, nums)) c = "r";
         }
         if (c == "?") {
           ok = false;
@@ -228,7 +232,7 @@ class JitScan {
       if (rc == "v" && !isVoid(ret)) ok = false;
       if (rc == "?" && sts.exists(trimQualifiers(ret))) rc = "t";
       if (rc == "?") ok = false;
-      if (rc == "S") ok = false;
+      if (rc == "S" || rc == "R") ok = false;
       var sig = rc + "(" + args.join("") + ")";
       var local = ret.indexOf("static") >= 0 || ret.indexOf("inline") >= 0;
       out.push({name: name, ret: rc, args: args, sig: sig, callable: ok, rawRet: ret, rawArgs: rawArgs, isStatic: local});
@@ -408,7 +412,7 @@ class JitScan {
     while (s.indexOf("  ") >= 0) s = s.split("  ").join(" ");
     if (s == "") return "v";
     if (s == "void") return "v";
-    if (s.indexOf("std::string") >= 0) return "S";
+    if (s.indexOf("std::string") >= 0) return s.indexOf("&") >= 0 ? "R" : "S";
     if (s.indexOf("*") >= 0) {
       if (s.indexOf("char") >= 0) return "s";
       return "p";

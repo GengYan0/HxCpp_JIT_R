@@ -11,7 +11,7 @@ typedef JitLeaf = {
 }
 
 class JitCodegen {
-  public static inline var BUILD:Int = 11;
+  public static inline var BUILD:Int = 12;
   public static inline var MAX_DEPTH:Int = 3;
 
   public static function emit(fns:Array<JitFnInfo>, vars:Array<JitVarInfo>, extra:Array<String> = null, structs:Array<JitStructInfo> = null, externs:Array<String> = null):String {
@@ -47,10 +47,10 @@ class JitCodegen {
       var key = ptrName(f.name, f.sig);
       if (!ptrs.exists(key)) {
         ptrs.set(key, true);
-        var fnty = retType(f.ret) + "(*)(" + [for (a in f.args) cppType(a)].join(",") + ")";
+        var fnty = retType(f.ret) + "(*)(" + (needsCustom(f) ? argParts(f, "args").types : [for (a in f.args) cppType(a)]).join(",") + ")";
         b.add('extern "C" RJIT_API double rjit_ptr_' + key + '(RJitCtx* ctx, RJitArgs* args) { return (double)(size_t)(void*)(' + fnty + ')&' + f.name + '; }\n');
       }
-      if (f.args.indexOf("t") >= 0) {
+      if (needsCustom(f)) {
         b.add(dispatcherFor(f));
       } else if (!sigs.exists(f.sig)) {
         sigs.set(f.sig, true);
@@ -93,6 +93,12 @@ class JitCodegen {
         for (l in leafList(stMap, v.structName)) {
           var fn = v.name + "__" + l.path.split(".").join("__");
           var acc = v.name + "." + l.path;
+          if (l.type == "S") {
+            needString = true;
+            b.add('extern "C" RJIT_API double rjit_getstr_' + fn + '(RJitCtx* ctx, RJitArgs* args) {\n  const std::string& v = ' + acc + ';\n  RJIT_RETSTRN(v.c_str(), (int)v.size());\n  return 0.0;\n}\n');
+            if (!v.isConst) b.add('extern "C" RJIT_API double rjit_setstr_' + fn + '(RJitCtx* ctx, RJitArgs* args) {\n  ' + acc + '.assign(args->s[0] != 0 ? args->s[0] : "", args->s[0] != 0 ? (size_t)args->sl[0] : (size_t)0);\n  return 0.0;\n}\n');
+            continue;
+          }
           b.add('extern "C" RJIT_API double rjit_getf_' + fn + '(RJitCtx* ctx, RJitArgs* args) { return ' + getExpr(l.type, acc) + '; }\n');
           if (!v.isConst) b.add('extern "C" RJIT_API double rjit_setf_' + fn + '(RJitCtx* ctx, RJitArgs* args) { ' + acc + ' = ' + setExpr(l.type, acc) + '; return ' + getExpr(l.type, acc) + '; }\n');
         }
@@ -105,6 +111,21 @@ class JitCodegen {
         for (l in leafList(stMap, v.structName)) {
           var fn = v.name + "__" + l.path.split(".").join("__");
           var acc = v.name + '[i].' + l.path;
+          if (l.type == "S") {
+            needString = true;
+            b.add('extern "C" RJIT_API double rjit_getstra_' + fn + '(RJitCtx* ctx, RJitArgs* args) {\n'
+              + '  int i = (int)args->a[0];\n'
+              + '  if (i < 0 || i >= ' + v.size + ') return 0.0;\n'
+              + '  const std::string& v = ' + acc + ';\n'
+              + '  RJIT_RETSTRN(v.c_str(), (int)v.size());\n'
+              + '  return 0.0;\n}\n');
+            if (!v.isConst) b.add('extern "C" RJIT_API double rjit_setstra_' + fn + '(RJitCtx* ctx, RJitArgs* args) {\n'
+              + '  int i = (int)args->a[0];\n'
+              + '  if (i < 0 || i >= ' + v.size + ') return 0.0;\n'
+              + '  ' + acc + '.assign(args->s[0] != 0 ? args->s[0] : "", args->s[0] != 0 ? (size_t)args->sl[0] : (size_t)0);\n'
+              + '  return 0.0;\n}\n');
+            continue;
+          }
           b.add('extern "C" RJIT_API double rjit_getfa_' + fn + '(RJitCtx* ctx, RJitArgs* args) {\n'
             + '  int i = (int)args->a[0];\n'
             + '  if (i < 0 || i >= ' + v.size + ') return 0.0;\n'
@@ -216,63 +237,58 @@ class JitCodegen {
     return t;
   }
 
-  public static function retWrapper(f:JitFnInfo):String {
+  public static function needsCustom(f:JitFnInfo):Bool {
+    return f.args.indexOf("t") >= 0 || f.args.indexOf("r") >= 0 || f.args.indexOf("R") >= 0;
+  }
+
+  static function argParts(f:JitFnInfo, pfx:String):{types:Array<String>, expr:Array<String>, strs:Int} {
     var types:Array<String> = [];
     var expr:Array<String> = [];
-    var numSlot = 0;
-    var strSlot = 0;
+    var num = 0;
+    var str = 0;
     for (i in 0...f.args.length) {
       var c = f.args[i];
       var raw = f.rawArgs != null && i < f.rawArgs.length ? StringTools.trim(f.rawArgs[i]) : null;
-      if (c == "t" && raw != null && raw != "") {
+      if ((c == "t" || c == "r") && raw != null && raw != "") {
         types.push(raw);
-        expr.push("*((" + pointee(raw) + "*)(size_t)args->a[" + numSlot + "])");
-        numSlot++;
+        expr.push("*((" + pointee(raw) + "*)(size_t)" + pfx + "->a[" + num + "])");
+        num++;
+      } else if (c == "R") {
+        types.push(raw != null && raw != "" ? raw : "const std::string&");
+        expr.push(argExpr("S", str, pfx));
+        str++;
       } else if (c == "s" || c == "S") {
         types.push(cppType(c));
-        expr.push(argExpr(c, strSlot, "args"));
-        strSlot++;
+        expr.push(argExpr(c, str, pfx));
+        str++;
       } else {
         types.push(cppType(c));
-        expr.push(argExpr(c, numSlot, "args"));
-        numSlot++;
+        expr.push(argExpr(c, num, pfx));
+        num++;
       }
     }
+    return {types: types, expr: expr, strs: str};
+  }
+
+  public static function retWrapper(f:JitFnInfo):String {
+    var a = argParts(f, "args");
     var rawRet = StringTools.trim(f.rawRet);
     while (StringTools.startsWith(rawRet, "static ")) rawRet = StringTools.trim(rawRet.substr(7));
     while (StringTools.startsWith(rawRet, "inline ")) rawRet = StringTools.trim(rawRet.substr(7));
-    var fnty = rawRet + "(*)(" + types.join(",") + ")";
+    var fnty = rawRet + "(*)(" + a.types.join(",") + ")";
     return 'extern "C" RJIT_API double rjit_ret_' + ptrName(f.name, f.sig) + '(RJitCtx* ctx, RJitArgs* args) {' + "\n"
-      + '  static ' + rawRet + ' rjit_buf;' + "\n"
-      + '  rjit_buf = ((' + fnty + ')&' + f.name + ')(' + expr.join(", ") + ');' + "\n"
-      + '  return (double)(size_t)(void*)&rjit_buf;' + "\n"
+      + '  static thread_local ' + rawRet + ' rjit_ring[8];' + "\n"
+      + '  static thread_local unsigned rjit_slot = 0;' + "\n"
+      + '  ' + rawRet + '& rjit_out = rjit_ring[rjit_slot++ & 7u];' + "\n"
+      + '  rjit_out = ((' + fnty + ')&' + f.name + ')(' + a.expr.join(", ") + ');' + "\n"
+      + '  return (double)(size_t)(void*)&rjit_out;' + "\n"
       + '}' + "\n";
   }
 
   public static function dispatcherFor(f:JitFnInfo):String {
-    var types:Array<String> = [];
-    var expr:Array<String> = [];
-    var numSlot = 0;
-    var strSlot = 0;
-    for (i in 0...f.args.length) {
-      var c = f.args[i];
-      var raw = f.rawArgs != null && i < f.rawArgs.length ? StringTools.trim(f.rawArgs[i]) : null;
-      if (c == "t" && raw != null && raw != "") {
-        types.push(raw);
-        expr.push("*((" + pointee(raw) + "*)(size_t)a->a[" + numSlot + "])");
-        numSlot++;
-      } else if (c == "s" || c == "S") {
-        types.push(cppType(c));
-        expr.push(argExpr(c, strSlot));
-        strSlot++;
-      } else {
-        types.push(cppType(c));
-        expr.push(argExpr(c, numSlot));
-        numSlot++;
-      }
-    }
-    var fnty = retType(f.ret) + "(*)(" + types.join(",") + ")";
-    var body = "((" + fnty + ")f)(" + expr.join(", ") + ")";
+    var a = argParts(f, "a");
+    var fnty = retType(f.ret) + "(*)(" + a.types.join(",") + ")";
+    var body = "((" + fnty + ")f)(" + a.expr.join(", ") + ")";
     var call = f.ret == "v" ? body + "; return 0.0;" : "return " + retCast(f.ret) + body + ";";
     return 'extern "C" RJIT_API double ' + dispNameOf(f.name, f.sig) + '(void* f, RJitArgs* a) { ' + call + ' }\n';
   }

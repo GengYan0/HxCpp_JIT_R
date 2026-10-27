@@ -4,9 +4,9 @@
   "license": "MIT",
   "tags": ["cpp", "jit", "native", "windows", "msvc", "runtime", "hot-reload"],
   "description": "Compile and call native C++ from a hxcpp application at runtime.",
-  "version": "0.0.17",
+  "version": "0.0.18",
   "classPath": "src",
-  "releasenote": "beta: struct parameters by value and reference, struct results by value, pointer and string members, secondary unit globals",
+  "releasenote": "beta: scalar and struct references, std::string members, bitwise and string expressions, struct result ring, ELF thread-local detection",
   "contributors": ["GengYan0"],
   "dependencies": {}
 }

@@ -29,6 +29,7 @@ typedef ElfInfo = {
 class JitElf {
   public static inline var PT_LOAD = 1;
   public static inline var PT_DYNAMIC = 2;
+  public static inline var PT_TLS = 7;
   public static inline var PT_INTERP = 3;
   public static inline var PT_PHDR = 6;
 
@@ -57,6 +58,8 @@ class JitElf {
   public static inline var DT_INIT_ARRAYSZ = 27;
   public static inline var DT_FINI_ARRAYSZ = 28;
   public static inline var DT_GNU_HASH = 0x6ffffef5;
+  public static inline var DT_RELRSZ = 35;
+  public static inline var DT_RELR = 36;
 
   public static inline var R_X86_64_64 = 1;
   public static inline var R_X86_64_COPY = 5;
@@ -137,6 +140,43 @@ class JitElf {
     return info;
   }
 
+  public static function tls(info:ElfInfo):Bool {
+    for (ph in info.phdrs) if (ph.type == PT_TLS) return true;
+    return false;
+  }
+
+  public static function relrTargets(b:haxe.io.Bytes, off:Int, size:Int):Array<Float> {
+    var out:Array<Float> = [];
+    var n = Std.int(size / 8);
+    var addr = 0.0;
+    var started = false;
+    for (i in 0...n) {
+      var o = off + i * 8;
+      var lo = u32(b, o);
+      var hi = u32(b, o + 4);
+      if (lo % 2 == 0) {
+        addr = lo + hi * 4294967296.0;
+        started = true;
+        out.push(addr);
+        addr += 8;
+        continue;
+      }
+      if (!started) break;
+      for (j in 1...64) {
+        var on = j < 32
+          ? Std.int(lo / Math.pow(2, j)) % 2 != 0
+          : Std.int(hi / Math.pow(2, j - 32)) % 2 != 0;
+        if (on) out.push(addr);
+        addr += 8;
+      }
+    }
+    return out;
+  }
+
+  static function isTlsReloc(ty:Int):Bool {
+    return (ty >= 16 && ty <= 18) || (ty >= 1028 && ty <= 1030) || (ty >= 1032 && ty <= 1037);
+  }
+
   static function roundUp(v:Float, to:Int):Float {
     var r = v % to;
     return r == 0 ? v : v + (to - r);
@@ -183,6 +223,10 @@ class JitElf {
     }
     if (info.machine != EM_X86_64 && info.machine != EM_AARCH64) {
       img.error = "unsupported machine " + info.machine;
+      return img;
+    }
+    if (tls(info)) {
+      img.error = "image declares thread-local storage, which manual mapping does not provide";
       return img;
     }
     var loads:Array<ElfPhdr> = [];
@@ -256,6 +300,8 @@ class JitElf {
     var jmpSz = 0.0;
     var hashVa = 0.0;
     var gnuHashVa = 0.0;
+    var relrVa = 0.0;
+    var relrSz = 0.0;
     var initVa = 0.0;
     var finiVa = 0.0;
     var initArrVa = 0.0;
@@ -280,6 +326,8 @@ class JitElf {
       else if (tag == DT_INIT) initVa = val;
       else if (tag == DT_FINI) finiVa = val;
       else if (tag == DT_INIT_ARRAY) initArrVa = val;
+      else if (tag == DT_RELR) relrVa = val;
+      else if (tag == DT_RELRSZ) relrSz = val;
       else if (tag == DT_INIT_ARRAYSZ) initArrSz = val;
       else if (tag == DT_FINI_ARRAY) finiArrVa = val;
       else if (tag == DT_FINI_ARRAYSZ) finiArrSz = val;
@@ -314,6 +362,20 @@ class JitElf {
     if (!applyRela(img, baseF, symtabVa, strtabVa, symCount, jmpVa, jmpSz, false)) {
       JitLoader.releaseImage(img);
       return img;
+    }
+
+    if (relrVa != 0 && relrSz > 0) {
+      var rt = relrTargets(bytes, Std.int(relrVa), Std.int(relrSz));
+      if (rt.length == 0) {
+        img.error = "empty packed relocation table";
+        JitLoader.releaseImage(img);
+        return img;
+      }
+      for (t in rt) {
+        var at = JitNative.toSizeT(baseF + t);
+        JitNative.poke(at, 8, JitNative.peek(at, 8) + baseF);
+        img.relocCount++;
+      }
     }
 
     collectExports(img, baseF, symtabVa, strtabVa, symCount);
@@ -416,6 +478,9 @@ class JitElf {
       } else if (ty == R_X86_64_COPY) {
         var sz = Std.int(mpeek(JitNative.toSizeT(JitNative.toFloat(symE) + 16), 8));
         if (sz > 0) JitNative.memcpyRaw(target, JitNative.toSizeT(sVal), sz);
+      } else if (isTlsReloc(ty)) {
+        img.error = "thread-local storage relocation " + ty + " is not supported";
+        return false;
       } else {
         img.error = "unsupported relocation type " + ty;
         return false;
