@@ -1,7 +1,7 @@
 package hxcpp_jit_r;
 
 class JitAbi {
-  public static inline var VERSION:Int = 5;
+  public static inline var VERSION:Int = 7;
 
   public static var HEADER:String = '#ifndef RJIT_ABI_H
 #define RJIT_ABI_H
@@ -9,7 +9,18 @@ class JitAbi {
 #include <string.h>
 #include <stdlib.h>
 
-#define RJIT_ABI_VERSION 5
+#define RJIT_ABI_VERSION 7
+
+#ifdef __cplusplus
+#include <limits>
+static inline double rjit_nan_val() {
+#if defined(_MSC_VER)
+  return std::numeric_limits<double>::quiet_NaN();
+#else
+  return __builtin_nan("");
+#endif
+}
+#endif
 
 #if defined(_WIN32)
 #define RJIT_API __declspec(dllexport)

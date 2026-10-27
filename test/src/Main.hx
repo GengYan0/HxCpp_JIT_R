@@ -5,6 +5,7 @@ import hxcpp_jit_r.JitSession;
 import hxcpp_jit_r.JitCompiler;
 import hxcpp_jit_r.JitElf;
 import hxcpp_jit_r.JitPtr;
+import hxcpp_jit_r.JitLoader;
 
 class Main {
   static var pass = 0;
@@ -652,6 +653,25 @@ void rename(const std::string& s) { item.name = s; }
     eq("string member length", Std.string(rf.callAuto("namelen", [0], [rf.str("item.name")])), "4");
     ok("string member rejects missing", !rf.setStr("item.nosuch", "x"), "");
 
+    head("exceptions, defaults and overloads");
+    var xm = Jit.compile("extras", '
+#include <stdexcept>
+double boom(double v) { if (v > 0) throw std::runtime_error("boom"); return v; }
+double dft(double a, double b = 10, double c = 100) { return a + b + c; }
+void shout(std::string& s) { s += "!"; }
+int tv(int v) { return v + 100; }
+double tv(double v) { return v + 0.5; }
+');
+    ok("extras module compiles", xm.ok, xm.diag.length > 0 ? JitCompiler.describe(xm.diag[0]) : "");
+    eq("cpp exception is trapped", Std.string(xm.callAuto("boom", [1])), "0");
+    eq("no exception path", Std.string(xm.callAuto("boom", [-1])), "-1");
+    eq("two defaults filled", Std.string(xm.callAuto("dft", [1])), "111");
+    eq("one default filled", Std.string(xm.callAuto("dft", [1, 2])), "103");
+    eq("all arguments given", Std.string(xm.callAuto("dft", [1, 2, 3])), "6");
+    eq("mutable string reference", xm.callStr("shout", [], ["hi"]), "hi!");
+    eq("typed overload picks int", Std.string(xm.callDyn("tv", [1])), "101");
+    eq("typed overload picks double", Std.string(xm.callDyn("tv", [1.5])), "2");
+
     head("expressions");
     var ex = Jit.compile("exprm", "
 double ax = 3; double ay = 4;
@@ -810,6 +830,20 @@ double alive() { return counter + hits[1]; }
     eq("relr direct slot", Std.string(Std.int(tg[0])), "4096");
     eq("relr bitmap slot", Std.string(Std.int(tg[1])), "4104");
     eq("relr resumes", Std.string(Std.int(tg[2])), "8192");
+
+    head("thread local blocks");
+    var seed = haxe.io.Bytes.alloc(8);
+    seed.setInt32(0, 0x11223344);
+    seed.setInt32(4, 0x55667788);
+    var tid = JitNative.tlsRegister(32, JitLoader.ptrOf(seed), 8);
+    ok("tls registered", tid > 0, "id=" + tid);
+    var tblock = JitNative.tlsBlock(tid);
+    ok("tls block allocated", tblock != 0, "");
+    eq("tls init copied", Std.string(Std.int(JitNative.peek(tblock, 4))), Std.string(0x11223344));
+    eq("tls second word", Std.string(Std.int(JitNative.peek(JitNative.toSizeT(JitNative.toFloat(tblock) + 4), 4))), Std.string(0x55667788));
+    eq("tls zero filled", Std.string(Std.int(JitNative.peek(JitNative.toSizeT(JitNative.toFloat(tblock) + 8), 4))), "0");
+    ok("tls resolver address", JitNative.tlsAddr() != 0, "");
+    eq("tls block is per thread copy", Std.string(JitNative.tlsBlock(tid) == tblock), "true");
 
     head("throughput");
     var pm = Jit.compile("perf", "RJIT(mix) { double s = 0; for (int i = 0; i < 8; i++) s += (double)i * RJIT_A0; return s; }\n");

@@ -11,7 +11,7 @@ typedef JitLeaf = {
 }
 
 class JitCodegen {
-  public static inline var BUILD:Int = 12;
+  public static inline var BUILD:Int = 13;
   public static inline var MAX_DEPTH:Int = 3;
 
   public static function emit(fns:Array<JitFnInfo>, vars:Array<JitVarInfo>, extra:Array<String> = null, structs:Array<JitStructInfo> = null, externs:Array<String> = null):String {
@@ -49,6 +49,10 @@ class JitCodegen {
         ptrs.set(key, true);
         var fnty = retType(f.ret) + "(*)(" + (needsCustom(f) ? argParts(f, "args").types : [for (a in f.args) cppType(a)]).join(",") + ")";
         b.add('extern "C" RJIT_API double rjit_ptr_' + key + '(RJitCtx* ctx, RJitArgs* args) { return (double)(size_t)(void*)(' + fnty + ')&' + f.name + '; }\n');
+      }
+      var df = defFrom(f);
+      if (df >= 0) {
+        for (k in df...f.args.length) b.add(arityDispatcher(f, k));
       }
       if (needsCustom(f)) {
         b.add(dispatcherFor(f));
@@ -228,7 +232,7 @@ class JitCodegen {
     var fnty = retType(ret) + "(*)(" + types.join(",") + ")";
     var body = "((" + fnty + ")f)(" + expr.join(", ") + ")";
     var call = ret == "v" ? body + "; return 0.0;" : "return " + retCast(ret) + body + ";";
-    return 'extern "C" RJIT_API double ' + name + '(void* f, RJitArgs* a) { ' + call + ' }\n';
+    return 'extern "C" RJIT_API double ' + name + '(RJitCtx* ctx, void* f, RJitArgs* a) { try { ' + call + ' } catch (...) { return rjit_nan_val(); } }' + "\n";
   }
 
   public static function pointee(raw:String):String {
@@ -238,12 +242,14 @@ class JitCodegen {
   }
 
   public static function needsCustom(f:JitFnInfo):Bool {
-    return f.args.indexOf("t") >= 0 || f.args.indexOf("r") >= 0 || f.args.indexOf("R") >= 0;
+    return f.args.indexOf("t") >= 0 || f.args.indexOf("r") >= 0 || f.args.indexOf("R") >= 0 || f.args.indexOf("W") >= 0;
   }
 
-  static function argParts(f:JitFnInfo, pfx:String):{types:Array<String>, expr:Array<String>, strs:Int} {
+  public static function argParts(f:JitFnInfo, pfx:String):{types:Array<String>, expr:Array<String>, strs:Int, pre:Array<String>, post:String} {
     var types:Array<String> = [];
     var expr:Array<String> = [];
+    var pre:Array<String> = [];
+    var post = "";
     var num = 0;
     var str = 0;
     for (i in 0...f.args.length) {
@@ -253,9 +259,16 @@ class JitCodegen {
         types.push(raw);
         expr.push("*((" + pointee(raw) + "*)(size_t)" + pfx + "->a[" + num + "])");
         num++;
-      } else if (c == "R") {
-        types.push(raw != null && raw != "" ? raw : "const std::string&");
-        expr.push(argExpr("S", str, pfx));
+      } else if (c == "R" || c == "W") {
+        types.push(raw != null && raw != "" ? raw : "std::string&");
+        if (c == "W") {
+          var nm = "rjit_w" + str;
+          pre.push("std::string " + nm + "(" + argExpr("S", str, pfx) + ");");
+          expr.push(nm);
+          if (post == "") post = "RJIT_RETSTRN(" + nm + ".c_str(), (int)" + nm + ".size());";
+        } else {
+          expr.push(argExpr("S", str, pfx));
+        }
         str++;
       } else if (c == "s" || c == "S") {
         types.push(cppType(c));
@@ -267,7 +280,26 @@ class JitCodegen {
         num++;
       }
     }
-    return {types: types, expr: expr, strs: str};
+    return {types: types, expr: expr, strs: str, pre: pre, post: post};
+  }
+
+  static function body(f:JitFnInfo, a:{types:Array<String>, expr:Array<String>, pre:Array<String>, post:String}, fnty:String):String {
+    var callExpr = "((" + fnty + ")f)(" + a.expr.join(", ") + ")";
+    var head = a.pre.length == 0 ? "" : a.pre.join(" ") + " ";
+    var tail = a.post == "" ? "" : " " + a.post;
+    if (f.ret == "v") return head + callExpr + ";" + tail + " return 0.0;";
+    return head + "double rjit_r = " + retCast(f.ret) + callExpr + ";" + tail + " return rjit_r;";
+  }
+
+  public static function defFrom(f:JitFnInfo):Int {
+    if (f.defaults == null) return -1;
+    var i = 0;
+    while (i < f.defaults.length && f.defaults[i] == "") i++;
+    return i < f.args.length ? i : -1;
+  }
+
+  public static function arityDispName(f:JitFnInfo, k:Int):String {
+    return "rjit_da_" + f.name + "_" + flat(f.sig) + "_" + k;
   }
 
   public static function retWrapper(f:JitFnInfo):String {
@@ -276,21 +308,36 @@ class JitCodegen {
     while (StringTools.startsWith(rawRet, "static ")) rawRet = StringTools.trim(rawRet.substr(7));
     while (StringTools.startsWith(rawRet, "inline ")) rawRet = StringTools.trim(rawRet.substr(7));
     var fnty = rawRet + "(*)(" + a.types.join(",") + ")";
+    var head = a.pre.length == 0 ? "" : a.pre.join(" ") + " ";
+    var tail = a.post == "" ? "" : "    " + a.post + "\n";
     return 'extern "C" RJIT_API double rjit_ret_' + ptrName(f.name, f.sig) + '(RJitCtx* ctx, RJitArgs* args) {' + "\n"
       + '  static thread_local ' + rawRet + ' rjit_ring[8];' + "\n"
       + '  static thread_local unsigned rjit_slot = 0;' + "\n"
       + '  ' + rawRet + '& rjit_out = rjit_ring[rjit_slot++ & 7u];' + "\n"
-      + '  rjit_out = ((' + fnty + ')&' + f.name + ')(' + a.expr.join(", ") + ');' + "\n"
+      + '  try {' + "\n"
+      + '    ' + head + 'rjit_out = ((' + fnty + ')&' + f.name + ')(' + a.expr.join(", ") + ');' + "\n"
+      + tail
+      + '  } catch (...) { return rjit_nan_val(); }' + "\n"
       + '  return (double)(size_t)(void*)&rjit_out;' + "\n"
       + '}' + "\n";
+  }
+
+  public static function arityDispatcher(f:JitFnInfo, k:Int):String {
+    var a = argParts(f, "a");
+    var part = {
+      types: a.types,
+      expr: a.expr.slice(0, k).concat([for (i in k...f.args.length) f.defaults[i]]),
+      pre: a.pre,
+      post: a.post
+    };
+    var fnty = retType(f.ret) + "(*)(" + a.types.join(",") + ")";
+    return 'extern "C" RJIT_API double ' + arityDispName(f, k) + '(RJitCtx* ctx, void* f, RJitArgs* a) { try { ' + body(f, part, fnty) + ' } catch (...) { return rjit_nan_val(); } }' + "\n";
   }
 
   public static function dispatcherFor(f:JitFnInfo):String {
     var a = argParts(f, "a");
     var fnty = retType(f.ret) + "(*)(" + a.types.join(",") + ")";
-    var body = "((" + fnty + ")f)(" + a.expr.join(", ") + ")";
-    var call = f.ret == "v" ? body + "; return 0.0;" : "return " + retCast(f.ret) + body + ";";
-    return 'extern "C" RJIT_API double ' + dispNameOf(f.name, f.sig) + '(void* f, RJitArgs* a) { ' + call + ' }\n';
+    return 'extern "C" RJIT_API double ' + dispNameOf(f.name, f.sig) + '(RJitCtx* ctx, void* f, RJitArgs* a) { try { ' + body(f, a, fnty) + ' } catch (...) { return rjit_nan_val(); } }' + "\n";
   }
 
   static function cppType(c:String):String {
@@ -328,25 +375,16 @@ class JitCodegen {
   }
 
   static function strWrapper(f:JitFnInfo):String {
-    var types:Array<String> = [];
-    var expr:Array<String> = [];
-    var numSlot = 0;
-    var strSlot = 0;
-    for (c in f.args) {
-      types.push(cppType(c));
-      if (c == "s" || c == "S") {
-        expr.push(argExpr(c, strSlot, "args"));
-        strSlot++;
-      } else {
-        expr.push(argExpr(c, numSlot, "args"));
-        numSlot++;
-      }
-    }
-    var fnty = "std::string(*)(" + types.join(",") + ")";
-    return 'extern "C" RJIT_API double rjit_str_' + ptrName(f.name, f.sig) + '(RJitCtx* ctx, RJitArgs* args) {\n'
-      + '  std::string r = ((' + fnty + ')&' + f.name + ')(' + expr.join(", ") + ');\n'
-      + '  RJIT_RETSTRN(r.c_str(), (int)r.size());\n'
-      + '  return 0.0;\n}\n';
+    var a = argParts(f, "args");
+    var fnty = "std::string(*)(" + a.types.join(",") + ")";
+    var head = a.pre.length == 0 ? "" : a.pre.join(" ") + " ";
+    return 'extern "C" RJIT_API double rjit_str_' + ptrName(f.name, f.sig) + '(RJitCtx* ctx, RJitArgs* args) {' + "\n"
+      + '  try {' + "\n"
+      + '    ' + head + 'std::string r = ((' + fnty + ')&' + f.name + ')(' + a.expr.join(", ") + ');' + "\n"
+      + '    RJIT_RETSTRN(r.c_str(), (int)r.size());' + "\n"
+      + '  } catch (...) { return rjit_nan_val(); }' + "\n"
+      + '  return 0.0;' + "\n"
+      + '}' + "\n";
   }
 
   static function retCast(c:String):String {

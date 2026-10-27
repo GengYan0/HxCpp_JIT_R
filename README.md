@@ -1,6 +1,6 @@
 # HxCpp_JIT_R
 
-Beta 0.0.18
+Beta 0.0.19
 
 Compile and call native C++ while your application is running. Hand it a source string, get a module back, call its functions like any Haxe method.
 
@@ -17,12 +17,13 @@ Behind the call the source goes into a cache directory, is compiled into a share
 - `std::string` results read back with `callStr`
 - Pointer variables: read, write, repoint, and `&name` for the address
 - Pointer, `const char*` and `std::string` members of structs, read with `str()` and written with `setStr()`
-- Struct and scalar reference parameters, and struct results by value read through a handle
+- Struct, scalar and string reference parameters, struct results by value read through a handle, and exceptions trapped at the boundary
 - `const char*` results read straight back by `callStr`
 - Zero-compile reads and writes for globals, struct fields and array elements
 - Handles resolved once at load, so the call path never reaches the symbol table
 - Struct arrays and nested fields: `pts[2].x`, `box.pos.x`, any depth up to three
 - Expression evaluation against live module state: `m.expr("p.x + p.y")`, including bitwise operators and string values
+- Default arguments filled from the declaration, and `callDyn` picking an overload by runtime argument types
 - Bound handles: `m.bind(name)` resolves the symbol and signature once, then calls at 0.015 us
 - Multiple translation units per module with local `#include` search paths, including their globals
 - Bulk array transfer for large buffers (`readDoubles`, `writeDoubles`, `readRaw`, `writeRaw`)
@@ -183,7 +184,8 @@ The standard library, inline assembly, SIMD intrinsics and templates all work. T
 | `callA(name, args)` | Variable argument count |
 | `callAuto(name, args, ?strs)` | Convert by scanned signature, picking the overload by argument count |
 | `callSig(name, sig, args, ?strs)` | Explicit signature, for overloads |
-| `callStr(name, args, ?strs):String` | Read an `RJIT_RETSTR` or `std::string` result |
+| `callStr(name, args, ?strs):String` | Read an `RJIT_RETSTR`, `std::string` or `const char*` result, or a `std::string&` written back |
+| `callDyn(name, args):Float` | Pick the overload from runtime argument types |
 | `bind(name, ?sig):JitFn` | Resolve the symbol once, then call through the handle |
 | `expr(code):Float` | Evaluate an expression against live module state |
 | `get(path)` / `set(path, v)` | `"n"`, `"&n"`, `"p.x"`, `"arr[2]"`, `"pts[2].x"`, `"box.pos.x"` |
@@ -414,6 +416,32 @@ m.str("item.name");                          // "alpha"
 ```
 
 `std::string` members are copied through the string slot, so the returned text stays valid after the call.
+
+A mutable `std::string&` writes its new value back through `callStr`:
+
+```haxe
+void shout(std::string& s) { s += "!"; }
+m.callStr("shout", [], ["hi"]);   // "hi!"
+```
+
+### Defaults, overloads and exceptions
+
+```haxe
+double dft(double a, double b = 10, double c = 100) { return a + b + c; }
+int tag(int v) { return v + 100; }
+double tag(double v) { return v + 0.5; }
+double boom(double v) { if (v > 0) throw std::runtime_error("boom"); return v; }
+```
+
+```haxe
+m.callAuto("dft", [1]);        // 111, defaults come from the declaration
+m.callAuto("dft", [1, 2]);     // 103
+m.callDyn("tag", [1]);         // 101, int overload
+m.callDyn("tag", [1.5]);       // 2, double overload
+m.callAuto("boom", [1]);       // 0, the exception is trapped and reported
+```
+
+`callAuto` picks by argument count; `callDyn` also looks at the runtime type of each argument. A thrown C++ exception ends the call with an error callback instead of unwinding into Haxe.
 
 ### Expressions
 
@@ -646,7 +674,9 @@ m.image.imports;       // resolved dependencies
 
 A manually mapped module is not in the system module list; `GetModuleHandle` cannot find it and `FreeLibrary` does not free it. Unload through `Jit.dispose`. For threads that touch TLS variables inside the library, call `JitLoader.bindThread()` on that thread.
 
-The same option on Linux maps the ELF image instead of calling `dlopen`: program headers are copied, relocations are applied from the dynamic section, and `DT_INIT`, `DT_INIT_ARRAY`, `DT_FINI` and `DT_FINI_ARRAY` run in order. ELF thread-local storage is left to the system loader, so keep `loader: "loadlib"` for libraries that declare TLS.
+The same option on Linux maps the ELF image instead of calling `dlopen`: program headers are copied, relocations are applied from the dynamic section, and `DT_INIT`, `DT_INIT_ARRAY`, `DT_FINI` and `DT_FINI_ARRAY` run in order.
+
+Thread-local storage is served by a resolver the loader installs for `__tls_get_addr`: each thread gets its own copy of the `PT_TLS` template, allocated on first use. Images compiled with `-ftls-model=initial-exec` or `local-exec` address TLS through the thread pointer instead and are refused with a message; `loader: "auto"` falls back to the system loader for them.
 
 ### Distributing a build cache
 
@@ -760,24 +790,24 @@ Time goes into compiler process startup and linking, not into the amount of code
 - Up to six numeric and four string arguments per call
 - Return values are numeric or `void`; pointers come back as addresses and `std::string` results go through `callStr`
 - Struct results by value land in a ring of eight per function and per thread, so the last eight results stay readable
-- C++ default arguments are not filled in
-- Overloads resolve by argument count; same-count overloads need `callSig`
+- Default arguments are filled from the declaration, so a call may pass fewer arguments than the signature lists
+- Overloads resolve by argument count, then by runtime argument types through `callDyn`; same-count same-type overloads still need `callSig`
 - Every guarded call costs an indirect jump; `callFast` removes the SEH guard but also removes crash containment
 - Compilation needs a local compiler; target machines fall back to the cache
-- SEH catches hardware exceptions only; C++ exceptions across the boundary are undefined
+- A C++ exception thrown by compiled code is caught at the boundary and reported as a failed call; destructors still run per the compiler's rules
 - Build timeout terminates the compiler process
 - Struct accessors cover leaf fields up to three levels of nesting, including pointer, `const char*` and `std::string` members
 - Manual mapping handles PE on Windows and ELF64 on Linux; other formats use the system loader
 - Globals in secondary units are exposed, but a struct-typed one needs the struct declared in the main unit
-- ELF manual mapping refuses images that declare thread-local storage and reports it; `loader: "auto"` then falls back to the system loader
-- Reference parameters are supported for scalars, structs and `const std::string&`; other reference types need a wrapper
+- ELF manual mapping serves thread-local storage through a general-dynamic resolver it installs itself; images built for initial-exec or local-exec are refused, and `loader: "auto"` falls back to the system loader for those
+- Reference parameters cover scalars, structs and `std::string`; a mutable `std::string&` writes back through `callStr`, and other reference types need a wrapper
 - Changing the ABI header layout requires clearing the host precompiled header and rebuilding
 
 ---
 
 ## Testing
 
-`test/` is a standalone console project with 340 assertions.
+`test/` is a standalone console project with 356 assertions.
 
 ```
 cd test
@@ -785,7 +815,7 @@ haxe build.hxml
 bin/Main.exe
 ```
 
-Covers: core calls, diagnostic line numbers, expression offset, automatic signatures, string arguments, string and `RJIT_RETSTR` results, struct and array access, struct arrays and nested fields, pointer and string members, expressions, bound handles, overlapping signatures, scalar and struct reference parameters, std::string members, bitwise and string expressions, struct result ring, ELF thread-local detection, packed relocations and their globals, pointer variables and address-of, bulk transfer, session state including struct arrays, crash isolation and error callback, pointer handle, overload dispatch, concurrency gate, hot reload, file watch, large source, cache hit, cache packaging and import, compiler-less mode, manual mapping and unload, ELF header parsing, call throughput.
+Covers: core calls, diagnostic line numbers, expression offset, automatic signatures, string arguments, string and `RJIT_RETSTR` results, struct and array access, struct arrays and nested fields, pointer, string and `std::string` members, scalar and struct references, expressions with bitwise and string values, bound handles, overlapping signatures, default arguments, callDyn overload choice, trapped C++ exceptions, multiple translation units and their globals, pointer variables and address-of, bulk transfer, session state including struct arrays, crash isolation and error callback, pointer handle, concurrency gate, hot reload, file watch, large source, cache hit, cache packaging and import, compiler-less mode, manual mapping and unload, ELF header parsing, thread-local blocks, packed relocations, call throughput.
 
 Linux:
 

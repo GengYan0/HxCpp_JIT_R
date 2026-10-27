@@ -174,7 +174,7 @@ class JitElf {
   }
 
   static function isTlsReloc(ty:Int):Bool {
-    return (ty >= 16 && ty <= 18) || (ty >= 1028 && ty <= 1030) || (ty >= 1032 && ty <= 1037);
+    return ty == 18 || ty == 19 || (ty >= 1030 && ty <= 1037);
   }
 
   static function roundUp(v:Float, to:Int):Float {
@@ -225,12 +225,9 @@ class JitElf {
       img.error = "unsupported machine " + info.machine;
       return img;
     }
-    if (tls(info)) {
-      img.error = "image declares thread-local storage, which manual mapping does not provide";
-      return img;
-    }
     var loads:Array<ElfPhdr> = [];
     var dynPh:ElfPhdr = null;
+    var tlsPh:ElfPhdr = null;
     var minVa = 0.0;
     var maxVa = 0.0;
     var first = true;
@@ -244,6 +241,8 @@ class JitElf {
         first = false;
       } else if (ph.type == PT_DYNAMIC) {
         dynPh = ph;
+      } else if (ph.type == PT_TLS) {
+        tlsPh = ph;
       }
     }
     if (loads.length == 0) {
@@ -262,6 +261,16 @@ class JitElf {
     }
     var baseF = JitNative.toFloat(alloc) - minVa;
     var src = JitLoader.ptrOf(bytes);
+    var tlsId = 0;
+    if (tlsPh != null) {
+      var init = JitNative.toSizeT(JitNative.toFloat(src) + tlsPh.offset);
+      tlsId = JitNative.tlsRegister(Std.int(tlsPh.memsz), init, Std.int(tlsPh.filesz));
+      if (tlsId == 0) {
+        img.error = "thread-local registry is full";
+        JitLoader.releaseImage(img);
+        return img;
+      }
+    }
     for (ph in loads) {
       var dst = JitNative.toSizeT(baseF + ph.vaddr);
       var len = Std.int(ph.filesz);
@@ -351,15 +360,15 @@ class JitElf {
 
     var symCount = symbolCount(baseF, hashVa, gnuHashVa);
 
-    if (!applyRela(img, baseF, symtabVa, strtabVa, symCount, relaVa, relaSz, false)) {
+    if (!applyRela(img, baseF, symtabVa, strtabVa, symCount, relaVa, relaSz, false, tlsId)) {
       JitLoader.releaseImage(img);
       return img;
     }
-    if (!applyRela(img, baseF, symtabVa, strtabVa, symCount, relVa, relSz, true)) {
+    if (!applyRela(img, baseF, symtabVa, strtabVa, symCount, relVa, relSz, true, tlsId)) {
       JitLoader.releaseImage(img);
       return img;
     }
-    if (!applyRela(img, baseF, symtabVa, strtabVa, symCount, jmpVa, jmpSz, false)) {
+    if (!applyRela(img, baseF, symtabVa, strtabVa, symCount, jmpVa, jmpSz, false, tlsId)) {
       JitLoader.releaseImage(img);
       return img;
     }
@@ -426,7 +435,7 @@ class JitElf {
     return 0;
   }
 
-  static function applyRela(img:JitImage, baseF:Float, symtab:Float, strtab:Float, symCount:Int, va:Float, size:Float, relStyle:Bool):Bool {
+  static function applyRela(img:JitImage, baseF:Float, symtab:Float, strtab:Float, symCount:Int, va:Float, size:Float, relStyle:Bool, tlsId:Int):Bool {
     if (va == 0 || size <= 0) return true;
     var ent = relStyle ? 16 : 24;
     var n = Std.int(size / ent);
@@ -443,6 +452,16 @@ class JitElf {
         : mpeek(JitNative.toSizeT(JitNative.toFloat(e) + 16), 8);
       var target = memAt(baseF, off);
       if (ty == 0) continue;
+      if (ty == 16 || ty == 1028) {
+        JitNative.poke(target, 8, tlsId * 1.0);
+        img.relocCount++;
+        continue;
+      }
+      if (ty == 17 || ty == 1029) {
+        JitNative.poke(target, 8, addend);
+        img.relocCount++;
+        continue;
+      }
       if (ty == R_X86_64_RELATIVE || ty == R_AARCH64_RELATIVE) {
         JitNative.poke(target, 8, baseF + addend);
         img.relocCount++;
@@ -465,7 +484,9 @@ class JitElf {
       if (shndx != 0 && value != 0) {
         sVal = baseF + value;
       } else if (name != "") {
-        sVal = JitNative.toFloat(JitNative.getProcGlobal(name));
+        sVal = name == "__tls_get_addr"
+          ? JitNative.toFloat(JitNative.tlsAddr())
+          : JitNative.toFloat(JitNative.getProcGlobal(name));
       }
       if (sVal == 0.0) {
         img.error = "unresolved symbol " + (name == "" ? "#" + symIdx : name);

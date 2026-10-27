@@ -80,14 +80,24 @@ class JitModule {
     for (n in fns.keys()) fn(n);
   }
 
-  public function dispFor(f:JitFnInfo):cpp.SizeT {
+  public function dispFor(f:JitFnInfo, arity:Int = -1):cpp.SizeT {
     if (f == null) return 0;
+    var full = f.args.length;
+    var k = arity < 0 || arity >= full ? full : arity;
+    if (k != full) {
+      var ka = "da|" + f.name + "|" + f.sig + "|" + k;
+      var va = pre.get(ka);
+      if (va != null) return JitNative.toSizeT(va);
+      var da = resolve(JitCodegen.arityDispName(f, k));
+      if (da != 0) pre.set(ka, JitNative.toFloat(da));
+      return da;
+    }
     if (!JitCodegen.needsCustom(f)) return dispOf(f.sig);
-    var k = "dn|" + f.name + "|" + f.sig;
-    var v = pre.get(k);
+    var kk = "dn|" + f.name + "|" + f.sig;
+    var v = pre.get(kk);
     if (v != null) return JitNative.toSizeT(v);
     var d = resolve(JitCodegen.dispNameOf(f.name, f.sig));
-    if (d != 0) pre.set(k, JitNative.toFloat(d));
+    if (d != 0) pre.set(kk, JitNative.toFloat(d));
     return d;
   }
 
@@ -587,22 +597,84 @@ class JitModule {
       var ss = 0;
       for (i in 0...a.length) {
         var c = a.charAt(i);
-        if (c == "s" || c == "S" || c == "R") ss++;
+        if (c == "s" || c == "S" || c == "R" || c == "W") ss++;
         else ns++;
       }
       if (ns == nums && ss == strs) return bySig.get(n + "|" + sg);
+    }
+    if (strs == 0) {
+      for (sg in list) {
+        var f = bySig.get(n + "|" + sg);
+        if (f == null) continue;
+        var df = JitCodegen.defFrom(f);
+        if (df >= 0 && nums >= df && nums < f.args.length) return f;
+      }
     }
     return fns.get(n);
   }
 
   public function callAuto(n:String, args:Array<Float>, ?strs:Array<String>):Float {
-    var f = pick(n, args == null ? 0 : args.length, strs == null ? 0 : strs.length);
+    var a = args == null ? [] : args;
+    return callPicked(pick(n, a.length, strs == null ? 0 : strs.length), n, a, strs);
+  }
+
+  public function callDyn(n:String, args:Array<Dynamic>):Float {
+    var nums:Array<Float> = [];
+    var pref = "";
+    for (v in args) {
+      if (v is Bool) {
+        nums.push((v:Bool) ? 1.0 : 0.0);
+        pref += "b";
+      } else if (v is Int) {
+        var i:Int = v;
+        nums.push(i * 1.0);
+        pref += "i";
+      } else {
+        nums.push(v);
+        pref += "d";
+      }
+    }
+    return callPicked(pickTyped(n, pref), n, nums, null);
+  }
+
+  static inline function isNumCode(c:String):Bool {
+    return "dfbchiul".indexOf(c) >= 0;
+  }
+
+  function pickTyped(n:String, pref:String):JitFnInfo {
+    var list = sigsOf.get(n);
+    if (list == null) return fns.get(n);
+    var best:JitFnInfo = null;
+    var bestScore = -9999;
+    for (sg in list) {
+      var f = bySig.get(n + "|" + sg);
+      if (f == null) continue;
+      if (f.args.length != pref.length) continue;
+      var score = 0;
+      for (i in 0...pref.length) {
+        var want = pref.charAt(i);
+        var got = f.args[i];
+        if (want == got) score += 3;
+        else if (isNumCode(want) && isNumCode(got)) score += 1;
+        else score -= 2;
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        best = f;
+      }
+    }
+    return best == null ? fns.get(n) : best;
+  }
+
+  function callPicked(f:JitFnInfo, n:String, args:Array<Float>, strs:Array<String>):Float {
     if (f == null || !f.callable || handle == 0) return callA(n, args);
     if (f.ret == "t") return callStruct(n, args, strs).address;
     var fp = ptrOf(n, f.sig);
     if (fp == 0) fp = resolve("rjit_ptr_" + n);
     if (fp == 0) return callA(n, args);
-    var d = dispFor(f);
+    var ar = f.args.length;
+    if (JitCodegen.defFrom(f) >= 0 && (strs == null || strs.length == 0)) ar = args.length;
+    var d = dispFor(f, ar);
     if (d == 0) return callA(n, args);
     calls++;
     var r = usesStr(f.sig)
@@ -613,7 +685,7 @@ class JitModule {
   }
 
   public static inline function usesStr(sig:String):Bool {
-    return sig.indexOf("s") >= 0 || sig.indexOf("S") >= 0 || sig.indexOf("R") >= 0;
+    return sig.indexOf("s") >= 0 || sig.indexOf("S") >= 0 || sig.indexOf("R") >= 0 || sig.indexOf("W") >= 0;
   }
 
   static inline function a(v:Array<Float>, i:Int):Float {
@@ -713,7 +785,7 @@ class JitModule {
       if (a == a && a != 0) return JitNative.readCStr(JitNative.toSizeT(a));
       return "";
     }
-    callA(n, args == null ? [] : args);
+    callAuto(n, args == null ? [] : args, strs);
     return JitHost.takeRet(id);
   }
 

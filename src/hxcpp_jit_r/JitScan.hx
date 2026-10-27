@@ -8,7 +8,13 @@ typedef JitFnInfo = {
   var callable:Bool;
   var rawRet:String;
   var rawArgs:Array<String>;
+  var defaults:Array<String>;
   var isStatic:Bool;
+}
+
+typedef JitArgText = {
+  var type:String;
+  var def:String;
 }
 
 typedef JitVarInfo = {
@@ -204,12 +210,19 @@ class JitScan {
       if (kw.indexOf(ret) >= 0) continue;
       if (ret.indexOf("(") >= 0) continue;
       var params = s.substr(p + 1, q - p - 1);
-      var rawArgs = splitArgs(params);
+      var rawArgs:Array<String> = [];
+      var defaults:Array<String> = [];
+      var argTexts = splitArgs(params);
+      for (a in argTexts) {
+        rawArgs.push(a.type);
+        defaults.push(a.def);
+      }
       var args:Array<String> = [];
       var ok = true;
       var strArgs = 0;
       for (t in rawArgs) {
         var c = code(t);
+        if (c == "R" && t.indexOf("const") < 0) c = "W";
         if (c == "?") {
           var raw0 = StringTools.trim(t);
           var bare = raw0;
@@ -235,7 +248,7 @@ class JitScan {
       if (rc == "S" || rc == "R") ok = false;
       var sig = rc + "(" + args.join("") + ")";
       var local = ret.indexOf("static") >= 0 || ret.indexOf("inline") >= 0;
-      out.push({name: name, ret: rc, args: args, sig: sig, callable: ok, rawRet: ret, rawArgs: rawArgs, isStatic: local});
+      out.push({name: name, ret: rc, args: args, sig: sig, callable: ok, rawRet: ret, rawArgs: rawArgs, defaults: defaults, isStatic: local});
     }
     return out;
   }
@@ -428,10 +441,10 @@ class JitScan {
     return "?";
   }
 
-  static function splitArgs(p:String):Array<String> {
+  static function splitArgs(p:String):Array<JitArgText> {
     var out:Array<String> = [];
     var t = StringTools.trim(p);
-    if (t == "" || t == "void") return out;
+    if (t == "" || t == "void") return [];
     var depth = 0;
     var start = 0;
     for (i in 0...t.length) {
@@ -444,14 +457,27 @@ class JitScan {
       }
     }
     out.push(StringTools.trim(t.substr(start)));
-    var res:Array<String> = [];
+    var res:Array<JitArgText> = [];
     for (x in out) {
       if (x == "" || x == "void") continue;
+      var def = "";
+      var d = 0;
+      for (i in 0...x.length) {
+        var c = x.charCodeAt(i);
+        if (c == 40 || c == 60 || c == 91) d++;
+        else if (c == 41 || c == 62 || c == 93) d--;
+        else if (c == 61 && d == 0) {
+          def = StringTools.trim(x.substr(i + 1));
+          x = StringTools.trim(x.substr(0, i));
+          break;
+        }
+      }
       var sp = lastSpace(x);
-      res.push(sp < 0 ? x : StringTools.trim(x.substr(0, sp)));
+      res.push({type: sp < 0 ? x : StringTools.trim(x.substr(0, sp)), def: def});
     }
     return res;
   }
+
 
   static function lastSpace(s:String):Int {
     var t = StringTools.trim(s);

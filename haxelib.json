@@ -4,9 +4,9 @@
   "license": "MIT",
   "tags": ["cpp", "jit", "native", "windows", "msvc", "runtime", "hot-reload"],
   "description": "Compile and call native C++ from a hxcpp application at runtime.",
-  "version": "0.0.18",
+  "version": "0.0.19",
   "classPath": "src",
-  "releasenote": "beta: scalar and struct references, std::string members, bitwise and string expressions, struct result ring, ELF thread-local detection",
+  "releasenote": "beta: default arguments, callDyn overload choice, trapped C++ exceptions, ELF dynamic thread-local storage, packed relocations",
   "contributors": ["GengYan0"],
   "dependencies": {}
 }

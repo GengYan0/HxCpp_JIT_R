@@ -32,9 +32,9 @@ static double rjit_guard2(double (*fn)(RJitCtx*, RJitArgs*), RJitCtx* c, RJitArg
   }
 }
 
-static double rjit_guard3(double (*fn)(void*, RJitArgs*), void* f, RJitArgs* a) {
+static double rjit_guard3(double (*fn)(RJitCtx*, void*, RJitArgs*), RJitCtx* c, void* f, RJitArgs* a) {
   __try {
-    return fn(f, a);
+    return fn(c, f, a);
   } __except (EXCEPTION_EXECUTE_HANDLER) {
     return rjit_nan();
   }
@@ -53,6 +53,39 @@ static int rjit_guard_entry(void* entry, void* hinst, unsigned long reason, void
   }
 }
 #endif
+
+struct RJitTlsDef { size_t size; const void* init; size_t initSize; };
+static RJitTlsDef rjit_tls_defs[32];
+static int rjit_tls_n = 0;
+static thread_local void* rjit_tls_blocks[32];
+
+extern "C" void* rjit_tls_get(void* idx) {
+  size_t* p = (size_t*)idx;
+  size_t m = p[0];
+  size_t off = p[1];
+  if (m == 0 || m > (size_t)rjit_tls_n) return 0;
+  size_t k = m - 1;
+  void* b = rjit_tls_blocks[k];
+  if (b == 0) {
+    size_t sz = rjit_tls_defs[k].size;
+    if (sz == 0) sz = 1;
+    b = malloc(sz + 16);
+    if (b == 0) return 0;
+    memset(b, 0, sz + 16);
+    if (rjit_tls_defs[k].init != 0 && rjit_tls_defs[k].initSize > 0) memcpy(b, rjit_tls_defs[k].init, rjit_tls_defs[k].initSize);
+    rjit_tls_blocks[k] = b;
+  }
+  return (void*)((char*)b + off);
+}
+
+static int rjit_tls_register(size_t size, const void* init, size_t initSize) {
+  if (rjit_tls_n >= 32) return 0;
+  int k = rjit_tls_n++;
+  rjit_tls_defs[k].size = size;
+  rjit_tls_defs[k].init = init;
+  rjit_tls_defs[k].initSize = initSize;
+  return k + 1;
+}
 ')
 @:headerCode('
 #ifndef RJIT_ABI_HOST
@@ -262,32 +295,14 @@ class JitNative {
     a.a[3] = a3;
     a.a[4] = a4;
     a.a[5] = a5;
-#ifdef _WIN32
-    return rjit_guard3(reinterpret_cast<double(*)(void*,RJitArgs*)>(disp), (void*)(size_t)f, &a);
-#else
-    return reinterpret_cast<double(*)(void*,RJitArgs*)>(disp)((void*)f, &a);
-#endif
-  ')
-  public static function invokeDisp(disp:cpp.SizeT, f:cpp.SizeT, n:Int, a0:Float, a1:Float, a2:Float, a3:Float, a4:Float, a5:Float):Float return 0;
-
-  @:functionCode('
-    RJitArgs a;
-    memset(&a, 0, sizeof(a));
-    a.n = n;
-    a.a[0] = a0;
-    a.a[1] = a1;
-    a.a[2] = a2;
-    a.a[3] = a3;
-    a.a[4] = a4;
-    a.a[5] = a5;
     double addr = 0.0;
 #ifdef _WIN32
     addr = rjit_guard2(reinterpret_cast<double(*)(RJitCtx*,RJitArgs*)>(ptrFn), reinterpret_cast<RJitCtx*>(ctx), &a);
     if (addr != addr) return addr;
-    return rjit_guard3(reinterpret_cast<double(*)(void*,RJitArgs*)>(disp), (void*)(size_t)addr, &a);
+    return rjit_guard3(reinterpret_cast<double(*)(RJitCtx*,void*,RJitArgs*)>(disp), reinterpret_cast<RJitCtx*>(ctx), (void*)(size_t)addr, &a);
 #else
     addr = reinterpret_cast<double(*)(RJitCtx*,RJitArgs*)>(ptrFn)(reinterpret_cast<RJitCtx*>(ctx), &a);
-    return reinterpret_cast<double(*)(void*,RJitArgs*)>(disp)((void*)(size_t)addr, &a);
+    return reinterpret_cast<double(*)(RJitCtx*,void*,RJitArgs*)>(disp)(reinterpret_cast<RJitCtx*>(ctx), (void*)(size_t)addr, &a);
 #endif
   ')
   public static function callVia(disp:cpp.SizeT, ptrFn:cpp.SizeT, ctx:cpp.SizeT, n:Int, a0:Float, a1:Float, a2:Float, a3:Float, a4:Float, a5:Float):Float return 0;
@@ -315,10 +330,10 @@ class JitNative {
 #ifdef _WIN32
     addr = rjit_guard2(reinterpret_cast<double(*)(RJitCtx*,RJitArgs*)>(ptrFn), reinterpret_cast<RJitCtx*>(ctx), &a);
     if (addr != addr) return addr;
-    return rjit_guard3(reinterpret_cast<double(*)(void*,RJitArgs*)>(disp), (void*)(size_t)addr, &a);
+    return rjit_guard3(reinterpret_cast<double(*)(RJitCtx*,void*,RJitArgs*)>(disp), reinterpret_cast<RJitCtx*>(ctx), (void*)(size_t)addr, &a);
 #else
     addr = reinterpret_cast<double(*)(RJitCtx*,RJitArgs*)>(ptrFn)(reinterpret_cast<RJitCtx*>(ctx), &a);
-    return reinterpret_cast<double(*)(void*,RJitArgs*)>(disp)((void*)(size_t)addr, &a);
+    return reinterpret_cast<double(*)(RJitCtx*,void*,RJitArgs*)>(disp)(reinterpret_cast<RJitCtx*>(ctx), (void*)(size_t)addr, &a);
 #endif
   ')
   public static function callViaB(disp:cpp.SizeT, ptrFn:cpp.SizeT, ctx:cpp.SizeT, n:Int, a0:Float, a1:Float, a2:Float, a3:Float, a4:Float, a5:Float,
@@ -528,6 +543,20 @@ class JitNative {
 
   @:functionCode('((void(*)(int,void*,void*))(size_t)f)(0, 0, 0); return 0.0;')
   public static function callInit(f:cpp.SizeT):Float return 0;
+
+  @:functionCode('return (size_t)&rjit_tls_get;')
+  public static function tlsAddr():cpp.SizeT return 0;
+
+  @:functionCode('return (int)rjit_tls_register((size_t)size, (const void*)(size_t)init, (size_t)initSize);')
+  public static function tlsRegister(size:Int, init:cpp.SizeT, initSize:Int):Int return 0;
+
+  @:functionCode('
+    size_t idx[2];
+    idx[0] = (size_t)id;
+    idx[1] = 0;
+    return (size_t)rjit_tls_get(idx);
+  ')
+  public static function tlsBlock(id:Int):cpp.SizeT return 0;
 
   @:functionCode('
 #ifdef _WIN32
