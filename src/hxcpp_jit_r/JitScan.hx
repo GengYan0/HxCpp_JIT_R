@@ -33,6 +33,7 @@ typedef JitFieldInfo = {
   var type:String;
   var raw:String;
   var nested:String;
+  var size:Int;
 }
 
 typedef JitStructInfo = {
@@ -164,15 +165,26 @@ class JitScan {
         if (sp < 0) continue;
         var ty = StringTools.trim(t.substr(0, sp));
         var fn = StringTools.trim(t.substr(sp + 1));
+        var asize = 0;
+        var lb = fn.indexOf("[");
+        if (lb > 0) {
+          var rb = fn.indexOf("]", lb);
+          if (rb < 0) continue;
+          var asz = Std.parseInt(StringTools.trim(fn.substring(lb + 1, rb)));
+          if (asz == null || asz <= 0) continue;
+          asize = asz;
+          fn = StringTools.trim(fn.substr(0, lb));
+        }
         if (!isIdent(fn)) continue;
         var c = code(ty);
         var tq = StringTools.trim(ty);
         if (c == "?" && known.exists(tq) && tq != d.name) {
-          fields.push({name: fn, type: "struct", raw: ty, nested: tq});
+          if (asize > 0) continue;
+          fields.push({name: fn, type: "struct", raw: ty, nested: tq, size: 0});
           continue;
         }
         if (c == "?" || c == "v" || c == "R") continue;
-        fields.push({name: fn, type: c, raw: ty, nested: ""});
+        fields.push({name: fn, type: c, raw: ty, nested: "", size: asize});
       }
       if (fields.length > 0) out.push({name: d.name, fields: fields});
     }

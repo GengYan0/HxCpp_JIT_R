@@ -8,10 +8,12 @@ import hxcpp_jit_r.JitScan.JitFieldInfo;
 typedef JitLeaf = {
   var path:String;
   var type:String;
+  var raw:String;
+  var size:Int;
 }
 
 class JitCodegen {
-  public static inline var BUILD:Int = 20;
+  public static inline var BUILD:Int = 23;
   public static inline var MAX_DEPTH:Int = 3;
 
   public static function emit(fns:Array<JitFnInfo>, vars:Array<JitVarInfo>, extra:Array<String> = null, structs:Array<JitStructInfo> = null, externs:Array<String> = null):String {
@@ -97,6 +99,13 @@ class JitCodegen {
         for (l in leafList(stMap, v.structName)) {
           var fn = v.name + "__" + l.path.split(".").join("__");
           var acc = v.name + "." + l.path;
+          if (l.size > 0) {
+            var acc2 = v.name + "." + l.path + "[j]";
+            var val2 = (l.type == "p" || l.type == "s") ? '(' + l.raw + ')(size_t)args->a[1]' : '(' + l.raw + ')args->a[1]';
+            b.add('extern "C" RJIT_API double rjit_getf2_' + fn + '(RJitCtx* ctx, RJitArgs* args) {\n  int j = (int)args->a[0];\n  if (j < 0 || j >= ' + l.size + ') return 0.0;\n  return ' + getExpr(l.type, acc2) + ';\n}\n');
+            if (!v.isConst) b.add('extern "C" RJIT_API double rjit_setf2_' + fn + '(RJitCtx* ctx, RJitArgs* args) {\n  int j = (int)args->a[0];\n  if (j < 0 || j >= ' + l.size + ') return 0.0;\n  ' + acc2 + ' = ' + val2 + ';\n  return ' + getExpr(l.type, acc2) + ';\n}\n');
+            continue;
+          }
           if (l.type == "S") {
             needString = true;
             b.add('extern "C" RJIT_API double rjit_getstr_' + fn + '(RJitCtx* ctx, RJitArgs* args) {\n  const std::string& v = ' + acc + ';\n  RJIT_RETSTRN(v.c_str(), (int)v.size());\n  return 0.0;\n}\n');
@@ -115,6 +124,13 @@ class JitCodegen {
         for (l in leafList(stMap, v.structName)) {
           var fn = v.name + "__" + l.path.split(".").join("__");
           var acc = v.name + '[i].' + l.path;
+          if (l.size > 0) {
+            var acc3 = v.name + '[i].' + l.path + '[j]';
+            var val3 = (l.type == "p" || l.type == "s") ? '(' + l.raw + ')(size_t)args->a[2]' : '(' + l.raw + ')args->a[2]';
+            b.add('extern "C" RJIT_API double rjit_getfa2_' + fn + '(RJitCtx* ctx, RJitArgs* args) {\n  int i = (int)args->a[0];\n  if (i < 0 || i >= ' + v.size + ') return 0.0;\n  int j = (int)args->a[1];\n  if (j < 0 || j >= ' + l.size + ') return 0.0;\n  return ' + getExpr(l.type, acc3) + ';\n}\n');
+            if (!v.isConst) b.add('extern "C" RJIT_API double rjit_setfa2_' + fn + '(RJitCtx* ctx, RJitArgs* args) {\n  int i = (int)args->a[0];\n  if (i < 0 || i >= ' + v.size + ') return 0.0;\n  int j = (int)args->a[1];\n  if (j < 0 || j >= ' + l.size + ') return 0.0;\n  ' + acc3 + ' = ' + val3 + ';\n  return ' + getExpr(l.type, acc3) + ';\n}\n');
+            continue;
+          }
           if (l.type == "S") {
             needString = true;
             b.add('extern "C" RJIT_API double rjit_getstra_' + fn + '(RJitCtx* ctx, RJitArgs* args) {\n'
@@ -170,7 +186,7 @@ class JitCodegen {
       if (f.nested != "") {
         for (q in leafList(stMap, f.nested, path, depth + 1)) out.push(q);
       } else {
-        out.push({path: path, type: f.type});
+        out.push({path: path, type: f.type, raw: f.raw, size: f.size});
       }
     }
     return out;

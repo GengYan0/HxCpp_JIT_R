@@ -513,6 +513,15 @@ class JitModule {
     return (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 95;
   }
 
+  function callIndex2(sym:String, ii:Int, jj:Int, two:Bool):Null<Float> {
+    var fp = resolve(sym);
+    if (fp == 0) return null;
+    var r = two
+      ? JitNative.invoke(fp, ctx, 2, ii, jj, 0, 0, 0, 0)
+      : JitNative.invoke(fp, ctx, 1, ii, 0, 0, 0, 0, 0);
+    return guard(r, "read", sym);
+  }
+
   function readPath(s:String):Null<Float> {
     var p = parsePath(s);
     if (p == null) return null;
@@ -522,6 +531,12 @@ class JitModule {
     if (segs.length == 0) {
       if (info.kind != "num" && info.kind != "ptr") return null;
       return getVar(p.base);
+    }
+    if (segs.length == 2 && segs[0].field && !segs[1].field && info.kind == "struct") {
+      return callIndex2("rjit_getf2_" + p.base + "__" + segs[0].name, segs[1].index, 0, false);
+    }
+    if (segs.length == 3 && !segs[0].field && segs[1].field && !segs[2].field && info.kind == "structarray") {
+      return callIndex2("rjit_getfa2_" + p.base + "__" + segs[1].name, segs[0].index, segs[2].index, true);
     }
     if (segs[0].field) {
       var fields = [];
@@ -555,6 +570,18 @@ class JitModule {
     if (segs.length == 0) {
       if (info.kind != "num" && info.kind != "ptr") return false;
       return setVar(p.base, val);
+    }
+    if (segs.length == 2 && segs[0].field && !segs[1].field && info.kind == "struct") {
+      var fp2 = resolve("rjit_setf2_" + p.base + "__" + segs[0].name);
+      if (fp2 == 0) return false;
+      guard(JitNative.invoke(fp2, ctx, 2, segs[1].index, val, 0, 0, 0, 0), "write", p.base);
+      return true;
+    }
+    if (segs.length == 3 && !segs[0].field && segs[1].field && !segs[2].field && info.kind == "structarray") {
+      var fq = resolve("rjit_setfa2_" + p.base + "__" + segs[1].name);
+      if (fq == 0) return false;
+      guard(JitNative.invoke(fq, ctx, 3, segs[0].index, segs[2].index, val, 0, 0, 0), "write", p.base);
+      return true;
     }
     if (segs[0].field) {
       var fields = [];

@@ -34,7 +34,8 @@ class Main {
   static function main() {
     var t0 = Sys.time();
     out.add("[jit] backend probe\n");
-    if (!Jit.setup({cache: Sys.getEnv("TEMP") + "/rjitcache", opt: "O2"})) {
+    Jit.cacheDir = Sys.getEnv("TEMP") + "/rjitcache";
+    if (!Jit.setup({opt: "O2"})) {
       Sys.println("setup failed: " + Jit.lastError);
       return;
     }
@@ -894,6 +895,23 @@ void wire() { slots[0] = &a; slots[1] = &b; }
     eq("pointer array written", Std.string(new JitPtr(pa.get("slots[2]")).readI32()), "7");
     eq("pointer array elem size", Std.string(pa.elemSize("slots")), "8");
     eq("numeric array still works", Std.string(pa.get("slots[3]")), "0");
+
+    head("array members");
+    var am2 = Jit.compile("arrmem", '
+struct Grid { double row[3]; int tag; };
+Grid g;
+Grid gs[2];
+void fill() { g.row[0] = 1; g.row[1] = 2; g.row[2] = 3; gs[1].row[2] = 9; }
+');
+    ok("array member compiles", am2.ok, am2.diag.length > 0 ? JitCompiler.describe(am2.diag[0]) : "");
+    am2.callAuto("fill", []);
+    eq("member array read", Std.string(am2.get("g.row[1]")), "2");
+    ok("member array write", am2.set("g.row[0]", 5), "");
+    eq("member array written", Std.string(am2.get("g.row[0]")), "5");
+    eq("member array out of range", Std.string(am2.get("g.row[7]")), "0");
+    eq("element array member", Std.string(am2.get("gs[1].row[2]")), "9");
+    ok("element array member write", am2.set("gs[0].row[1]", 4), "");
+    eq("element array member written", Std.string(am2.get("gs[0].row[1]")), "4");
 
     head("throughput");
     var pm = Jit.compile("perf", "RJIT(mix) { double s = 0; for (int i = 0; i < 8; i++) s += (double)i * RJIT_A0; return s; }\n");

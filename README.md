@@ -1,6 +1,6 @@
 # HxCpp_JIT_R
 
-0.1.4
+0.1.5
 
 Compile and call native C++ while your application is running. Hand it a source string, get a module back, call its functions like any Haxe method.
 
@@ -19,7 +19,7 @@ Behind the call the source goes into a cache directory, is compiled into a share
 - Pointer, `const char*` and `std::string` members of structs, and `std::string` / `const char*` globals, read with `str()` and written with `setStr()`
 - Struct, scalar and string reference parameters, struct results by value read through a handle, and exceptions trapped at the boundary
 - `const char*` results read straight back by `callStr`
-- Zero-compile reads and writes for globals, struct fields and array elements
+- Zero-compile reads and writes for globals, struct fields, array elements and array members (`g.row[2]`, `gs[1].row[2]`)
 - Handles resolved once at load, so the call path never reaches the symbol table
 - Struct arrays and nested fields: `pts[2].x`, `box.pos.x`, any depth up to three
 - Expression evaluation against live module state: `m.expr("p.x + p.y")`, including bitwise operators and string values
@@ -813,7 +813,7 @@ Time goes into compiler process startup and linking, not into the amount of code
 
 ## Testing
 
-`test/` is a standalone console project with 376 assertions.
+`test/` is a standalone console project with 384 assertions.
 
 ```
 cd test
