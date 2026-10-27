@@ -663,7 +663,9 @@ int tv(int v) { return v + 100; }
 double tv(double v) { return v + 0.5; }
 ');
     ok("extras module compiles", xm.ok, xm.diag.length > 0 ? JitCompiler.describe(xm.diag[0]) : "");
+    JitHost.capture = true;
     eq("cpp exception is trapped", Std.string(xm.callAuto("boom", [1])), "0");
+    ok("exception message reaches the log", JitHost.logs.join(" ").indexOf("boom") >= 0, JitHost.logs.join(" ").substr(0, 60));
     eq("no exception path", Std.string(xm.callAuto("boom", [-1])), "-1");
     eq("two defaults filled", Std.string(xm.callAuto("dft", [1])), "111");
     eq("one default filled", Std.string(xm.callAuto("dft", [1, 2])), "103");

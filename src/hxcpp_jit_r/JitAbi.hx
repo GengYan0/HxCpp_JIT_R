@@ -1,7 +1,7 @@
 package hxcpp_jit_r;
 
 class JitAbi {
-  public static inline var VERSION:Int = 8;
+  public static inline var VERSION:Int = 9;
 
   public static var HEADER:String = '#ifndef RJIT_ABI_H
 #define RJIT_ABI_H
@@ -9,10 +9,11 @@ class JitAbi {
 #include <string.h>
 #include <stdlib.h>
 
-#define RJIT_ABI_VERSION 8
+#define RJIT_ABI_VERSION 9
 
 #ifdef __cplusplus
 #include <limits>
+#include <exception>
 static inline double rjit_nan_val() {
 #if defined(_MSC_VER)
   return std::numeric_limits<double>::quiet_NaN();
@@ -83,6 +84,7 @@ typedef double (*RJitFn)(RJitCtx*, RJitArgs*);
 #define RJIT_RETSTR(s) (ctx->h->retstr(ctx->m, (s), (int)strlen(s)), 0.0)
 #define RJIT_RETSTRN(s, n) (ctx->h->retstr(ctx->m, (s), (int)(n)), 0.0)
 #define RJIT_RETSTR2N(s, n) (ctx->h->retstr2(ctx->m, (s), (int)(n)), 0.0)
+#define RJIT_ERRN(s, n) (ctx->h->log(ctx->m, (s), (int)(n)), 0.0)
 #define RJIT_CALL0(n) (ctx->h->call(ctx->m, (n), (int)strlen(n), 0.0, 0.0, 0.0, 0.0))
 #define RJIT_CALL1(n,x) (ctx->h->call(ctx->m, (n), (int)strlen(n), (x), 0.0, 0.0, 0.0))
 #define RJIT_CALL2(n,x,y) (ctx->h->call(ctx->m, (n), (int)strlen(n), (x), (y), 0.0, 0.0))

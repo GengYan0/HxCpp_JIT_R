@@ -11,7 +11,7 @@ typedef JitLeaf = {
 }
 
 class JitCodegen {
-  public static inline var BUILD:Int = 19;
+  public static inline var BUILD:Int = 20;
   public static inline var MAX_DEPTH:Int = 3;
 
   public static function emit(fns:Array<JitFnInfo>, vars:Array<JitVarInfo>, extra:Array<String> = null, structs:Array<JitStructInfo> = null, externs:Array<String> = null):String {
@@ -236,7 +236,7 @@ class JitCodegen {
     var fnty = retType(ret) + "(*)(" + types.join(",") + ")";
     var body = "((" + fnty + ")f)(" + expr.join(", ") + ")";
     var call = ret == "v" ? body + "; return 0.0;" : "return " + retCast(ret) + body + ";";
-    return 'extern "C" RJIT_API double ' + name + '(RJitCtx* ctx, void* f, RJitArgs* a) { try { ' + call + ' } catch (...) { return rjit_nan_val(); } }' + "\n";
+    return 'extern "C" RJIT_API double ' + name + '(RJitCtx* ctx, void* f, RJitArgs* a) { try { ' + call + ' } catch (const std::exception& e) { RJIT_ERRN(e.what(), (int)strlen(e.what())); return rjit_nan_val(); } catch (...) { return rjit_nan_val(); } }' + "\n";
   }
 
   public static function pointee(raw:String):String {
@@ -330,7 +330,7 @@ class JitCodegen {
       + '  try {' + "\n"
       + '    ' + head + 'rjit_out = ((' + fnty + ')&' + f.name + ')(' + a.expr.join(", ") + ');' + "\n"
       + tail
-      + '  } catch (...) { return rjit_nan_val(); }' + "\n"
+      + '  } catch (const std::exception& e) { RJIT_ERRN(e.what(), (int)strlen(e.what())); return rjit_nan_val(); } catch (...) { return rjit_nan_val(); }' + "\n"
       + '  return (double)(size_t)(void*)&rjit_out;' + "\n"
       + '}' + "\n";
   }
@@ -344,13 +344,13 @@ class JitCodegen {
       post: a.post
     };
     var fnty = retType(f.ret) + "(*)(" + a.types.join(",") + ")";
-    return 'extern "C" RJIT_API double ' + arityDispName(f, k) + '(RJitCtx* ctx, void* f, RJitArgs* a) { try { ' + body(f, part, fnty) + ' } catch (...) { return rjit_nan_val(); } }' + "\n";
+    return 'extern "C" RJIT_API double ' + arityDispName(f, k) + '(RJitCtx* ctx, void* f, RJitArgs* a) { try { ' + body(f, part, fnty) + ' } catch (const std::exception& e) { RJIT_ERRN(e.what(), (int)strlen(e.what())); return rjit_nan_val(); } catch (...) { return rjit_nan_val(); } }' + "\n";
   }
 
   public static function dispatcherFor(f:JitFnInfo):String {
     var a = argParts(f, "a");
     var fnty = retType(f.ret) + "(*)(" + a.types.join(",") + ")";
-    return 'extern "C" RJIT_API double ' + dispNameOf(f.name, f.sig) + '(RJitCtx* ctx, void* f, RJitArgs* a) { try { ' + body(f, a, fnty) + ' } catch (...) { return rjit_nan_val(); } }' + "\n";
+    return 'extern "C" RJIT_API double ' + dispNameOf(f.name, f.sig) + '(RJitCtx* ctx, void* f, RJitArgs* a) { try { ' + body(f, a, fnty) + ' } catch (const std::exception& e) { RJIT_ERRN(e.what(), (int)strlen(e.what())); return rjit_nan_val(); } catch (...) { return rjit_nan_val(); } }' + "\n";
   }
 
   static function cppType(c:String):String {
@@ -396,7 +396,7 @@ class JitCodegen {
       + '    ' + head + 'std::string r = ((' + fnty + ')&' + f.name + ')(' + a.expr.join(", ") + ');' + "\n"
       + '    RJIT_RETSTRN(r.c_str(), (int)r.size());' + "\n"
       + (a.post == "" ? "" : '    RJIT_RETSTR2N(' + wname(f) + '.c_str(), (int)' + wname(f) + '.size());' + "\n")
-      + '  } catch (...) { return rjit_nan_val(); }' + "\n"
+      + '  } catch (const std::exception& e) { RJIT_ERRN(e.what(), (int)strlen(e.what())); return rjit_nan_val(); } catch (...) { return rjit_nan_val(); }' + "\n"
       + '  return 0.0;' + "\n"
       + '}' + "\n";
   }

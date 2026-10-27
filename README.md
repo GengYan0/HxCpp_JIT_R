@@ -1,6 +1,6 @@
 # HxCpp_JIT_R
 
-0.1.2
+0.1.3
 
 Compile and call native C++ while your application is running. Hand it a source string, get a module back, call its functions like any Haxe method.
 
@@ -800,7 +800,7 @@ Time goes into compiler process startup and linking, not into the amount of code
 - Overloads resolve by argument count, then by runtime argument types through `callDyn`; when two candidates score the same, `callDyn` reports it and the call needs `callSig`
 - Every guarded call costs an indirect jump; `callFast` removes the SEH guard but also removes crash containment
 - Compilation needs a local compiler; target machines fall back to the cache
-- A C++ exception thrown by compiled code is caught at the boundary and reported as a failed call; destructors still run per the compiler's rules
+- A C++ exception thrown by compiled code is caught at the boundary, reported as a failed call, and its `what()` text is written to the log
 - Build timeout terminates the compiler process
 - Struct accessors cover leaf fields up to three levels of nesting, including pointer, `const char*` and `std::string` members
 - Manual mapping handles PE on Windows and ELF64 on Linux; other formats use the system loader
@@ -813,7 +813,7 @@ Time goes into compiler process startup and linking, not into the amount of code
 
 ## Testing
 
-`test/` is a standalone console project with 375 assertions.
+`test/` is a standalone console project with 376 assertions.
 
 ```
 cd test
