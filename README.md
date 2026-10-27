@@ -1,6 +1,6 @@
 # HxCpp_JIT_R
 
-Beta 0.0.19
+Beta 0.0.20
 
 Compile and call native C++ while your application is running. Hand it a source string, get a module back, call its functions like any Haxe method.
 
@@ -185,6 +185,7 @@ The standard library, inline assembly, SIMD intrinsics and templates all work. T
 | `callAuto(name, args, ?strs)` | Convert by scanned signature, picking the overload by argument count |
 | `callSig(name, sig, args, ?strs)` | Explicit signature, for overloads |
 | `callStr(name, args, ?strs):String` | Read an `RJIT_RETSTR`, `std::string` or `const char*` result, or a `std::string&` written back |
+| `callStrBoth(name, args, ?strs):{a, b}` | Both the returned string and the `std::string&` written back |
 | `callDyn(name, args):Float` | Pick the overload from runtime argument types |
 | `bind(name, ?sig):JitFn` | Resolve the symbol once, then call through the handle |
 | `expr(code):Float` | Evaluate an expression against live module state |
@@ -417,11 +418,16 @@ m.str("item.name");                          // "alpha"
 
 `std::string` members are copied through the string slot, so the returned text stays valid after the call.
 
-A mutable `std::string&` writes its new value back through `callStr`:
+A mutable `std::string&` writes its new value back through `callStr`, and `callStrBoth` keeps both strings when the function also returns one:
 
 ```haxe
 void shout(std::string& s) { s += "!"; }
-m.callStr("shout", [], ["hi"]);   // "hi!"
+std::string tag(std::string& s) { s += "+"; return "ret:"; }
+
+m.callStr("shout", [], ["hi"]);                  // "hi!"
+var r = m.callStrBoth("tag", [], ["v"]);
+r.a;                                             // "ret:"
+r.b;                                             // "v+"
 ```
 
 ### Defaults, overloads and exceptions
@@ -791,7 +797,7 @@ Time goes into compiler process startup and linking, not into the amount of code
 - Return values are numeric or `void`; pointers come back as addresses and `std::string` results go through `callStr`
 - Struct results by value land in a ring of eight per function and per thread, so the last eight results stay readable
 - Default arguments are filled from the declaration, so a call may pass fewer arguments than the signature lists
-- Overloads resolve by argument count, then by runtime argument types through `callDyn`; same-count same-type overloads still need `callSig`
+- Overloads resolve by argument count, then by runtime argument types through `callDyn`; when two candidates score the same, `callDyn` reports it and the call needs `callSig`
 - Every guarded call costs an indirect jump; `callFast` removes the SEH guard but also removes crash containment
 - Compilation needs a local compiler; target machines fall back to the cache
 - A C++ exception thrown by compiled code is caught at the boundary and reported as a failed call; destructors still run per the compiler's rules
@@ -799,15 +805,15 @@ Time goes into compiler process startup and linking, not into the amount of code
 - Struct accessors cover leaf fields up to three levels of nesting, including pointer, `const char*` and `std::string` members
 - Manual mapping handles PE on Windows and ELF64 on Linux; other formats use the system loader
 - Globals in secondary units are exposed, but a struct-typed one needs the struct declared in the main unit
-- ELF manual mapping serves thread-local storage through a general-dynamic resolver it installs itself; images built for initial-exec or local-exec are refused, and `loader: "auto"` falls back to the system loader for those
-- Reference parameters cover scalars, structs and `std::string`; a mutable `std::string&` writes back through `callStr`, and other reference types need a wrapper
+- ELF manual mapping serves thread-local storage through a general-dynamic resolver it installs itself; an image that addresses TLS through the thread pointer instead is handed to the system loader, even with `loader: "manual"`
+- Reference parameters cover scalars, structs and `std::string`; a mutable `std::string&` writes back through `callStr` or `callStrBoth`, and other reference types need a wrapper
 - Changing the ABI header layout requires clearing the host precompiled header and rebuilding
 
 ---
 
 ## Testing
 
-`test/` is a standalone console project with 356 assertions.
+`test/` is a standalone console project with 362 assertions.
 
 ```
 cd test

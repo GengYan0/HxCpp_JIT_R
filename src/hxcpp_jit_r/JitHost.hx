@@ -4,6 +4,7 @@ class JitHost {
   static var mods:Map<Int, JitModule> = new Map();
   static var binds:Map<String, Dynamic> = new Map();
   static var rets:Map<Int, String> = new Map();
+  static var ret2:Map<Int, String> = new Map();
   static var vars:Map<String, Float> = new Map();
 
   public static var logger:String->Void = null;
@@ -51,6 +52,7 @@ class JitHost {
 
   public static function clearRet(id:Int):Void {
     rets.remove(id);
+    ret2.remove(id);
   }
 
   public static function takeRet(id:Int):String {
@@ -74,6 +76,16 @@ class JitHost {
 
   public static function onRetStr(id:Int, s:String):Void {
     rets.set(id, s);
+  }
+
+  public static function onRetStr2(id:Int, s:String):Void {
+    ret2.set(id, s);
+  }
+
+  public static function takeRet2(id:Int):String {
+    var r = ret2.get(id);
+    ret2.remove(id);
+    return r == null ? "" : r;
   }
 
   public static function onGet(id:Int, key:String):Float {

@@ -669,6 +669,24 @@ double tv(double v) { return v + 0.5; }
     eq("one default filled", Std.string(xm.callAuto("dft", [1, 2])), "103");
     eq("all arguments given", Std.string(xm.callAuto("dft", [1, 2, 3])), "6");
     eq("mutable string reference", xm.callStr("shout", [], ["hi"]), "hi!");
+
+    var pw = Jit.compile("pairstr", '
+#include <string>
+std::string tag(std::string& s) { s += "+"; return std::string("ret:"); }
+');
+    ok("pair string module", pw.ok, pw.diag.length > 0 ? JitCompiler.describe(pw.diag[0]) : "");
+    var pair = pw.callStrBoth("tag", [], ["v"]);
+    eq("return string kept", pair.a, "ret:");
+    eq("written back string kept", pair.b, "v+");
+
+    var pw = Jit.compile("pairstr", '
+#include <string>
+std::string tag(std::string& s) { s += "+"; return std::string("ret:"); }
+');
+    ok("pair string module", pw.ok, pw.diag.length > 0 ? JitCompiler.describe(pw.diag[0]) : "");
+    var pair = pw.callStrBoth("tag", [], ["v"]);
+    eq("return string kept", pair.a, "ret:");
+    eq("written back string kept", pair.b, "v+");
     eq("typed overload picks int", Std.string(xm.callDyn("tv", [1])), "101");
     eq("typed overload picks double", Std.string(xm.callDyn("tv", [1.5])), "2");
 

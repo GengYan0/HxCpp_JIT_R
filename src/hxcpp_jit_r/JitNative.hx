@@ -57,7 +57,12 @@ static int rjit_guard_entry(void* entry, void* hinst, unsigned long reason, void
 struct RJitTlsDef { size_t size; const void* init; size_t initSize; };
 static RJitTlsDef rjit_tls_defs[32];
 static int rjit_tls_n = 0;
-static thread_local void* rjit_tls_blocks[32];
+struct RJitTlsHolder {
+  void* p[32];
+  RJitTlsHolder() { memset(p, 0, sizeof(p)); }
+  ~RJitTlsHolder() { for (int i = 0; i < 32; i++) if (p[i] != 0) free(p[i]); }
+};
+static thread_local RJitTlsHolder rjit_tls_holder;
 
 extern "C" void* rjit_tls_get(void* idx) {
   size_t* p = (size_t*)idx;
@@ -65,7 +70,7 @@ extern "C" void* rjit_tls_get(void* idx) {
   size_t off = p[1];
   if (m == 0 || m > (size_t)rjit_tls_n) return 0;
   size_t k = m - 1;
-  void* b = rjit_tls_blocks[k];
+  void* b = rjit_tls_holder.p[k];
   if (b == 0) {
     size_t sz = rjit_tls_defs[k].size;
     if (sz == 0) sz = 1;
@@ -73,7 +78,7 @@ extern "C" void* rjit_tls_get(void* idx) {
     if (b == 0) return 0;
     memset(b, 0, sz + 16);
     if (rjit_tls_defs[k].init != 0 && rjit_tls_defs[k].initSize > 0) memcpy(b, rjit_tls_defs[k].init, rjit_tls_defs[k].initSize);
-    rjit_tls_blocks[k] = b;
+    rjit_tls_holder.p[k] = b;
   }
   return (void*)((char*)b + off);
 }
@@ -99,6 +104,7 @@ struct RJitHost {
   void   (*log)(void* m, const char* s, int len);
   double (*call)(void* m, const char* name, int len, double a0, double a1, double a2, double a3);
   void   (*retstr)(void* m, const char* s, int len);
+  void   (*retstr2)(void* m, const char* s, int len);
   double (*get)(void* m, const char* key, int len);
 };
 
@@ -134,6 +140,10 @@ class JitNative {
     JitHost.onRetStr(id, s);
   }
 
+  public static function onRetStr2(id:Int, s:String):Void {
+    JitHost.onRetStr2(id, s);
+  }
+
   public static function onGet(id:Int, key:String):Float {
     return JitHost.onGet(id, key);
   }
@@ -150,6 +160,7 @@ class JitNative {
         return ::hxcpp_jit_r::JitNative_obj::onCall((int)(size_t)m, ::String::create(n, len), a0, a1, a2, a3);
       };
       table.retstr = [](void* m, const char* s, int len) { ::hxcpp_jit_r::JitNative_obj::onRetStr((int)(size_t)m, ::String::create(s, len)); };
+      table.retstr2 = [](void* m, const char* s, int len) { ::hxcpp_jit_r::JitNative_obj::onRetStr2((int)(size_t)m, ::String::create(s, len)); };
       table.get = [](void* m, const char* k, int len) -> double { return ::hxcpp_jit_r::JitNative_obj::onGet((int)(size_t)m, ::String::create(k, len)); };
     }
     RJitCtx* c = (RJitCtx*)malloc(sizeof(RJitCtx));

@@ -43,6 +43,7 @@ class JitImage {
   public var ok:Bool = false;
   public var error:String = "";
   public var manual:Bool = false;
+  public var needsLoader:Bool = false;
   public var handle:cpp.SizeT = 0;
   public var alloc:cpp.SizeT = 0;
   public var allocSize:Int = 0;

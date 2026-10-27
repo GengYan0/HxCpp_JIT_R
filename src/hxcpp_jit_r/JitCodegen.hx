@@ -283,6 +283,15 @@ class JitCodegen {
     return {types: types, expr: expr, strs: str, pre: pre, post: post};
   }
 
+  static function wname(f:JitFnInfo):String {
+    var n = 0;
+    for (i in 0...f.args.length) {
+      if (f.args[i] == "s" || f.args[i] == "S" || f.args[i] == "R") n++;
+      else if (f.args[i] == "W") return "rjit_w" + n;
+    }
+    return "rjit_w0";
+  }
+
   static function body(f:JitFnInfo, a:{types:Array<String>, expr:Array<String>, pre:Array<String>, post:String}, fnty:String):String {
     var callExpr = "((" + fnty + ")f)(" + a.expr.join(", ") + ")";
     var head = a.pre.length == 0 ? "" : a.pre.join(" ") + " ";
@@ -382,6 +391,7 @@ class JitCodegen {
       + '  try {' + "\n"
       + '    ' + head + 'std::string r = ((' + fnty + ')&' + f.name + ')(' + a.expr.join(", ") + ');' + "\n"
       + '    RJIT_RETSTRN(r.c_str(), (int)r.size());' + "\n"
+      + (a.post == "" ? "" : '    RJIT_RETSTR2N(' + wname(f) + '.c_str(), (int)' + wname(f) + '.size());' + "\n")
       + '  } catch (...) { return rjit_nan_val(); }' + "\n"
       + '  return 0.0;' + "\n"
       + '}' + "\n";

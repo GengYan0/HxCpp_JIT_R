@@ -646,6 +646,7 @@ class JitModule {
     if (list == null) return fns.get(n);
     var best:JitFnInfo = null;
     var bestScore = -9999;
+    var tie = false;
     for (sg in list) {
       var f = bySig.get(n + "|" + sg);
       if (f == null) continue;
@@ -661,7 +662,14 @@ class JitModule {
       if (score > bestScore) {
         bestScore = score;
         best = f;
+        tie = false;
+      } else if (score == bestScore && f != best) {
+        tie = true;
       }
+    }
+    if (tie) {
+      JitHost.error("callDyn", n, "overloads share the same arity and types, use callSig");
+      return null;
     }
     return best == null ? fns.get(n) : best;
   }
@@ -804,6 +812,11 @@ class JitModule {
           bytesOf(strs, 0), bytesOf(strs, 1), bytesOf(strs, 2), bytesOf(strs, 3))
       : JitNative.invoke(p, ctx, ar.length, a(ar, 0), a(ar, 1), a(ar, 2), a(ar, 3), a(ar, 4), a(ar, 5));
     return new JitPtr(guard(r, "callStruct", n));
+  }
+
+  public function callStrBoth(n:String, args:Array<Float> = null, ?strs:Array<String>):{a:String, b:String} {
+    var a = callStr(n, args, strs);
+    return {a: a, b: JitHost.takeRet2(id)};
   }
 
   public function str(path:String):String {

@@ -500,7 +500,8 @@ class JitElf {
         var sz = Std.int(mpeek(JitNative.toSizeT(JitNative.toFloat(symE) + 16), 8));
         if (sz > 0) JitNative.memcpyRaw(target, JitNative.toSizeT(sVal), sz);
       } else if (isTlsReloc(ty)) {
-        img.error = "thread-local storage relocation " + ty + " is not supported";
+        img.needsLoader = true;
+        img.error = "image addresses thread-local storage through the thread pointer";
         return false;
       } else {
         img.error = "unsupported relocation type " + ty;

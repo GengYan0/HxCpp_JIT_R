@@ -4,9 +4,9 @@
   "license": "MIT",
   "tags": ["cpp", "jit", "native", "windows", "msvc", "runtime", "hot-reload"],
   "description": "Compile and call native C++ from a hxcpp application at runtime.",
-  "version": "0.0.19",
+  "version": "0.0.20",
   "classPath": "src",
-  "releasenote": "beta: default arguments, callDyn overload choice, trapped C++ exceptions, ELF dynamic thread-local storage, packed relocations",
+  "releasenote": "beta: dual string results, loader fallback for thread-pointer TLS, thread local cleanup, overload tie detection",
   "contributors": ["GengYan0"],
   "dependencies": {}
 }

@@ -553,10 +553,10 @@ class Jit {
       if (image.ok) {
         m.image = image;
         h = image.base;
-      } else if (loader == "manual") {
+      } else if (loader == "manual" && !image.needsLoader) {
         m.diag.push(diag("E_IMAGE", image.error));
         return false;
-      } else if (debug) {
+      } else if (debug || image.needsLoader) {
         log("[jit] manual map skipped: " + image.error);
       }
     }
