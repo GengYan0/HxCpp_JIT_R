@@ -34,7 +34,7 @@ class Main {
   static function main() {
     var t0 = Sys.time();
     out.add("[jit] backend probe\n");
-    if (!Jit.setup({cache: "jitcache", opt: "O2"})) {
+    if (!Jit.setup({cache: Sys.getEnv("TEMP") + "/rjitcache", opt: "O2"})) {
       Sys.println("setup failed: " + Jit.lastError);
       return;
     }
@@ -397,7 +397,7 @@ int ids[3];
     ok("cold compile", c1.ok);
     Jit.exportPack("packcold");
     hxcpp_jit_r.JitToolchain.forceUnavailable = true;
-    var coldDir = "coldcache_" + Std.string(Std.int(Sys.time() * 1000)) + "_" + Std.string(Std.random(1000));
+    var coldDir = Sys.getEnv("TEMP") + "/rjitcold_" + Std.string(Std.int(Sys.time() * 1000)) + "_" + Std.string(Std.random(1000));
     Jit.setup({cache: coldDir});
     ok("toolchain disabled", !Jit.ready, Jit.lastError);
     var beforeImp = Jit.compile("cold", coldSrc);
@@ -430,9 +430,9 @@ int ids[3];
 
     head("concurrent cold build");
     var oldCache = Jit.cacheDir;
-    var cdir = "coldconc_" + Std.string(Std.int(Sys.time() * 1000)) + "_" + Std.string(Std.random(1000));
+    var cdir = Sys.getEnv("TEMP") + "/rjitconc_" + Std.string(Std.int(Sys.time() * 1000)) + "_" + Std.string(Std.random(1000));
     Jit.setup({cache: cdir});
-    ok("cold cache switched", Jit.cache.root.indexOf(cdir) >= 0, Jit.cache.root);
+    ok("cold cache switched", Jit.cache.root.indexOf("rjitconc_") >= 0, Jit.cache.root);
     Jit.maxParallel = 2;
     var done = 0;
     var faults:Array<String> = [];
