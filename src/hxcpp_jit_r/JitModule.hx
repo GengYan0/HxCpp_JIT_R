@@ -319,12 +319,12 @@ class JitModule {
 
   public static function elemSizeOf(c:String):Int {
     return switch (c) {
-      case "c": 1;
+      case "c", "b": 1;
       case "h": 2;
       case "l": 8;
       case "f": 4;
       case "d": 8;
-      case "p", "s", "S": 8;
+      case "p", "s": 8;
       default: 4;
     }
   }
@@ -836,7 +836,7 @@ class JitModule {
     if (cached == null && p != 0) pre.set(k, JitNative.toFloat(p));
     if (p == 0) return new JitPtr(0);
     calls++;
-    var r = f.sig.indexOf("s") >= 0
+    var r = usesStr(f.sig)
       ? JitNative.invokeB(p, ctx, ar.length, a(ar, 0), a(ar, 1), a(ar, 2), a(ar, 3), a(ar, 4), a(ar, 5),
           bytesOf(strs, 0), bytesOf(strs, 1), bytesOf(strs, 2), bytesOf(strs, 3))
       : JitNative.invoke(p, ctx, ar.length, a(ar, 0), a(ar, 1), a(ar, 2), a(ar, 3), a(ar, 4), a(ar, 5));
@@ -975,9 +975,12 @@ class JitModule {
       if (d != 0) JitNative.invoke(d, ctx, 0, 0, 0, 0, 0, 0, 0);
     }
     JitHost.remove(id);
-    if (ctx != 0) JitNative.freeCtx(ctx);
-    if (handle == 0) return;
-    Jit.retire(handle, image);
+    if (handle == 0) {
+      if (ctx != 0) JitNative.freeCtx(ctx);
+      ctx = 0;
+      return;
+    }
+    Jit.retire(handle, image, ctx);
     image = null;
     handle = 0;
     ctx = 0;

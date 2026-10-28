@@ -11,10 +11,21 @@ package hxcpp_jit_r;
 #include <windows.h>
 #else
 #include <dlfcn.h>
+#include <signal.h>
+#include <setjmp.h>
 #include <sys/mman.h>
+#include <unistd.h>
 #endif
 #include <stdlib.h>
 #include <string.h>
+#include <stddef.h>
+#include <string>
+#include <vector>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <atomic>
+#include <chrono>
 
 static double rjit_nan(void) {
   unsigned long long bits = 0x7FF8000000000000ULL;
@@ -56,17 +67,16 @@ static int rjit_guard_entry(void* entry, void* hinst, unsigned long reason, void
 #endif
 
 #ifndef _WIN32
-#include <signal.h>
-#include <setjmp.h>
+#define RJIT_GUARD_DEPTH 8
 
-static __thread sigjmp_buf rjit_jb;
-static __thread int rjit_guarded = 0;
-static int rjit_hooked = 0;
+static thread_local sigjmp_buf rjit_jb[RJIT_GUARD_DEPTH];
+static thread_local int rjit_guard_depth = 0;
 
 static void rjit_sig_handler(int sig, siginfo_t* si, void* uc) {
-  if (rjit_guarded) {
-    rjit_guarded = 0;
-    siglongjmp(rjit_jb, 1);
+  if (rjit_guard_depth > 0) {
+    int d = rjit_guard_depth - 1;
+    rjit_guard_depth = d;
+    siglongjmp(rjit_jb[d], 1);
   }
   struct sigaction dfl;
   memset(&dfl, 0, sizeof(dfl));
@@ -76,80 +86,203 @@ static void rjit_sig_handler(int sig, siginfo_t* si, void* uc) {
 }
 
 static void rjit_hook(void) {
-  if (rjit_hooked) return;
-  rjit_hooked = 1;
-  static const int sigs[4] = {SIGSEGV, SIGBUS, SIGFPE, SIGILL};
-  for (int i = 0; i < 4; i++) {
-    struct sigaction sa;
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_sigaction = rjit_sig_handler;
-    sa.sa_flags = SA_SIGINFO | SA_ONSTACK | SA_NODEFER;
-    sigemptyset(&sa.sa_mask);
-    sigaction(sigs[i], &sa, 0);
-  }
+  static std::once_flag once;
+  std::call_once(once, [] {
+    static const int sigs[4] = {SIGSEGV, SIGBUS, SIGFPE, SIGILL};
+    for (int i = 0; i < 4; i++) {
+      struct sigaction sa;
+      memset(&sa, 0, sizeof(sa));
+      sa.sa_sigaction = rjit_sig_handler;
+      sa.sa_flags = SA_SIGINFO | SA_ONSTACK | SA_NODEFER;
+      sigemptyset(&sa.sa_mask);
+      sigaction(sigs[i], &sa, 0);
+    }
+  });
 }
 
 static double rjit_guard2(double (*fn)(RJitCtx*, RJitArgs*), RJitCtx* c, RJitArgs* a) {
   rjit_hook();
-  if (sigsetjmp(rjit_jb, 1) != 0) return rjit_nan();
-  rjit_guarded = 1;
+  int saved = rjit_guard_depth;
+  if (saved >= RJIT_GUARD_DEPTH) return rjit_nan();
+  if (sigsetjmp(rjit_jb[saved], 1) != 0) {
+    rjit_guard_depth = saved;
+    return rjit_nan();
+  }
+  rjit_guard_depth = saved + 1;
   double r = fn(c, a);
-  rjit_guarded = 0;
+  rjit_guard_depth = saved;
   return r;
 }
 
 static double rjit_guard3(double (*fn)(RJitCtx*, void*, RJitArgs*), RJitCtx* c, void* f, RJitArgs* a) {
   rjit_hook();
-  if (sigsetjmp(rjit_jb, 1) != 0) return rjit_nan();
-  rjit_guarded = 1;
+  int saved = rjit_guard_depth;
+  if (saved >= RJIT_GUARD_DEPTH) return rjit_nan();
+  if (sigsetjmp(rjit_jb[saved], 1) != 0) {
+    rjit_guard_depth = saved;
+    return rjit_nan();
+  }
+  rjit_guard_depth = saved + 1;
   double r = fn(c, f, a);
-  rjit_guarded = 0;
+  rjit_guard_depth = saved;
   return r;
 }
 #endif
 
-static RJitHost* rjit_host_table = 0;
+static RJitHost rjit_host_impl;
+static std::once_flag rjit_host_once;
+static std::atomic<RJitHost*> rjit_host_table(0);
 
-struct RJitTlsDef { size_t size; const void* init; size_t initSize; };
+static void rjit_host_init(void) {
+  std::call_once(rjit_host_once, [] {
+    rjit_host_impl.alloc = [](void* m, int n) -> void* { return malloc((size_t)n); };
+    rjit_host_impl.dealloc = [](void* m, void* p) { free(p); };
+    rjit_host_impl.log = [](void* m, const char* s, int len) { ::hxcpp_jit_r::JitNative_obj::onLog((int)(size_t)m, ::String::create(s, len)); };
+    rjit_host_impl.call = [](void* m, const char* n, int len, double a0, double a1, double a2, double a3) -> double {
+      return ::hxcpp_jit_r::JitNative_obj::onCall((int)(size_t)m, ::String::create(n, len), a0, a1, a2, a3);
+    };
+    rjit_host_impl.retstr = [](void* m, const char* s, int len) { ::hxcpp_jit_r::JitNative_obj::onRetStr((int)(size_t)m, ::String::create(s, len)); };
+    rjit_host_impl.retstr2 = [](void* m, const char* s, int len) { ::hxcpp_jit_r::JitNative_obj::onRetStr2((int)(size_t)m, ::String::create(s, len)); };
+    rjit_host_impl.get = [](void* m, const char* k, int len) -> double { return ::hxcpp_jit_r::JitNative_obj::onGet((int)(size_t)m, ::String::create(k, len)); };
+    rjit_host_table.store(&rjit_host_impl, std::memory_order_release);
+  });
+}
+
+struct RJitTlsDef {
+  size_t size;
+  size_t initSize;
+  void* init;
+  unsigned gen;
+};
+
+static std::mutex rjit_tls_mu;
 static RJitTlsDef rjit_tls_defs[32];
-static int rjit_tls_n = 0;
+static unsigned rjit_tls_gen = 0;
+
 struct RJitTlsHolder {
   void* p[32];
-  RJitTlsHolder() { memset(p, 0, sizeof(p)); }
+  unsigned gen[32];
+  RJitTlsHolder() { memset(p, 0, sizeof(p)); memset(gen, 0, sizeof(gen)); }
   ~RJitTlsHolder() { for (int i = 0; i < 32; i++) if (p[i] != 0) free(p[i]); }
 };
 static thread_local RJitTlsHolder rjit_tls_holder;
 
 extern "C" void* rjit_tls_get(void* idx) {
-  size_t* p = (size_t*)idx;
-  size_t m = p[0];
-  size_t off = p[1];
-  if (m == 0 || m > (size_t)rjit_tls_n) return 0;
-  size_t k = m - 1;
-  void* b = rjit_tls_holder.p[k];
-  if (b == 0) {
-    size_t sz = rjit_tls_defs[k].size;
-    if (sz == 0) sz = 1;
-    b = malloc(sz + 16);
+  if (idx == 0) return 0;
+  size_t* q = (size_t*)idx;
+  size_t m = q[0];
+  size_t off = q[1];
+  if (m == 0) return 0;
+  unsigned slot = (unsigned)(m & 0xffu);
+  unsigned gen = (unsigned)(m >> 8);
+  if (slot == 0 || slot > 32u) return 0;
+  slot--;
+  RJitTlsHolder& h = rjit_tls_holder;
+  if (h.gen[slot] != gen) {
+    if (h.p[slot] != 0) {
+      free(h.p[slot]);
+      h.p[slot] = 0;
+    }
+    h.gen[slot] = 0;
+    size_t sz = 0;
+    size_t isz = 0;
+    const void* ini = 0;
+    {
+      std::lock_guard<std::mutex> lk(rjit_tls_mu);
+      RJitTlsDef& d = rjit_tls_defs[slot];
+      if (d.size == 0 || d.gen != gen) return 0;
+      sz = d.size;
+      isz = d.initSize;
+      ini = d.init;
+    }
+    void* b = malloc(sz + 16);
     if (b == 0) return 0;
     memset(b, 0, sz + 16);
-    if (rjit_tls_defs[k].init != 0 && rjit_tls_defs[k].initSize > 0) memcpy(b, rjit_tls_defs[k].init, rjit_tls_defs[k].initSize);
-    rjit_tls_holder.p[k] = b;
+    if (ini != 0 && isz > 0) memcpy(b, ini, isz > sz ? sz : isz);
+    h.p[slot] = b;
+    h.gen[slot] = gen;
   }
-  return (void*)((char*)b + off);
+  return (void*)((char*)h.p[slot] + off);
 }
+
+static int rjit_tls_register(size_t size, const void* init, size_t initSize) {
+  if (size == 0) size = 1;
+  if (initSize > size) initSize = size;
+  void* copy = 0;
+  if (init != 0 && initSize > 0) {
+    copy = malloc(initSize);
+    if (copy == 0) return 0;
+    memcpy(copy, init, initSize);
+  }
+  std::lock_guard<std::mutex> lk(rjit_tls_mu);
+  int slot = -1;
+  for (int i = 0; i < 32; i++) {
+    if (rjit_tls_defs[i].size == 0) {
+      slot = i;
+      break;
+    }
+  }
+  if (slot < 0) {
+    free(copy);
+    return 0;
+  }
+  rjit_tls_gen++;
+  if (rjit_tls_gen == 0 || rjit_tls_gen > 0xffffffu) rjit_tls_gen = 1;
+  RJitTlsDef& d = rjit_tls_defs[slot];
+  d.size = size;
+  d.initSize = initSize;
+  d.init = copy;
+  d.gen = rjit_tls_gen;
+  return (int)((rjit_tls_gen << 8) | (unsigned)(slot + 1));
+}
+
+static void rjit_tls_unregister(int id) {
+  if (id <= 0) return;
+  unsigned slot = ((unsigned)id & 0xffu);
+  unsigned gen = (unsigned)id >> 8;
+  if (slot == 0 || slot > 32u) return;
+  std::lock_guard<std::mutex> lk(rjit_tls_mu);
+  RJitTlsDef& d = rjit_tls_defs[slot - 1];
+  if (d.gen != gen) return;
+  free(d.init);
+  d.init = 0;
+  d.initSize = 0;
+  d.size = 0;
+  d.gen = 0;
+}
+
+#ifdef _WIN32
+#define RJIT_WIN_TLS_MAX 1100
+
+struct RJitWinTlsSlot {
+  std::vector<void*> blocks;
+};
+
+static RJitWinTlsSlot rjit_win_tls[RJIT_WIN_TLS_MAX];
+static std::mutex rjit_win_tls_mu;
+
+static void rjit_win_tls_track(int idx, void* p) {
+  if (idx < 0 || idx >= RJIT_WIN_TLS_MAX || p == 0) return;
+  std::lock_guard<std::mutex> lk(rjit_win_tls_mu);
+  rjit_win_tls[idx].blocks.push_back(p);
+}
+
+static void rjit_win_tls_release(int idx) {
+  if (idx < 0 || idx >= RJIT_WIN_TLS_MAX) return;
+  std::vector<void*> take;
+  {
+    std::lock_guard<std::mutex> lk(rjit_win_tls_mu);
+    take.swap(rjit_win_tls[idx].blocks);
+  }
+  for (size_t i = 0; i < take.size(); i++) free(take[i]);
+}
+#endif
 
 #ifdef _WIN32
 #define RJIT_HOST_EXPORT __declspec(dllexport)
 #else
 #define RJIT_HOST_EXPORT __attribute__((visibility("default")))
 #endif
-
-#include <thread>
-#include <mutex>
-#include <condition_variable>
-#include <atomic>
-#include <chrono>
 
 #define RJIT_JOB_MAX 16
 
@@ -165,15 +298,16 @@ struct RJitJob {
   double result;
   char* text;
   int textLen;
+  unsigned seq;
 };
 
 static RJitJob rjit_jobs[RJIT_JOB_MAX];
+static unsigned rjit_job_seq = 0;
 static std::mutex rjit_job_mu;
-static std::condition_variable rjit_job_ready;
 static std::condition_variable rjit_job_done;
 static std::thread::id rjit_host_tid;
 static std::atomic<bool> rjit_host_set(false);
-static int rjit_wait_ms = 2000;
+static std::atomic<int> rjit_wait_ms(2000);
 
 extern "C" RJIT_HOST_EXPORT void rjit_set_host_thread(void) {
   rjit_host_tid = std::this_thread::get_id();
@@ -181,7 +315,7 @@ extern "C" RJIT_HOST_EXPORT void rjit_set_host_thread(void) {
 }
 
 extern "C" RJIT_HOST_EXPORT void rjit_set_wait(int ms) {
-  rjit_wait_ms = ms < 1 ? 1 : ms;
+  rjit_wait_ms.store(ms < 1 ? 1 : ms);
 }
 
 static bool rjit_on_host(void) {
@@ -208,14 +342,17 @@ static double rjit_queue(void* m, const char* n, int len, double a0, double a1, 
   j.text = 0;
   j.textLen = 0;
   j.len = len > 127 ? 127 : len;
+  if (j.len < 0) j.len = 0;
+  if (n == 0) j.len = 0;
   if (j.len > 0) memcpy(j.name, n, (size_t)j.len);
   j.name[j.len] = 0;
   j.a0 = a0;
   j.a1 = a1;
   j.a2 = a2;
   j.a3 = a3;
-  rjit_job_ready.notify_one();
-  bool ok = rjit_job_done.wait_for(lk, std::chrono::milliseconds(rjit_wait_ms), [&] { return j.done; });
+  unsigned mine = ++rjit_job_seq;
+  j.seq = mine;
+  bool ok = rjit_job_done.wait_for(lk, std::chrono::milliseconds(rjit_wait_ms.load()), [&] { return j.done && j.seq == mine; });
   double r = 0.0;
   if (ok) {
     r = j.result;
@@ -230,6 +367,7 @@ static double rjit_queue(void* m, const char* n, int len, double a0, double a1, 
     j.text = 0;
   }
   j.active = false;
+  j.done = false;
   lk.unlock();
   rjit_job_done.notify_all();
   return r;
@@ -238,15 +376,32 @@ static double rjit_queue(void* m, const char* n, int len, double a0, double a1, 
 extern "C" RJIT_HOST_EXPORT void rjit_pump(void) {
   rjit_host_tid = std::this_thread::get_id();
   rjit_host_set.store(true);
-  if (rjit_host_table == 0) return;
-  for (int round = 0; round < 8; round++) {
+  if (rjit_host_table.load(std::memory_order_acquire) == 0) return;
+  for (int round = 0; round < RJIT_JOB_MAX; round++) {
     int idx = -1;
+    unsigned seq = 0;
+    bool isStr = false;
+    void* m = 0;
+    char name[128];
+    int len = 0;
+    double a0 = 0.0, a1 = 0.0, a2 = 0.0, a3 = 0.0;
     {
       std::lock_guard<std::mutex> lk(rjit_job_mu);
       for (int i = 0; i < RJIT_JOB_MAX; i++) {
         if (rjit_jobs[i].active && !rjit_jobs[i].taken) {
           idx = i;
-          rjit_jobs[i].taken = true;
+          RJitJob& s = rjit_jobs[i];
+          s.taken = true;
+          seq = s.seq;
+          isStr = s.isStr;
+          m = s.m;
+          len = s.len;
+          if (len > 0) memcpy(name, s.name, (size_t)len);
+          name[len] = 0;
+          a0 = s.a0;
+          a1 = s.a1;
+          a2 = s.a2;
+          a3 = s.a3;
           break;
         }
       }
@@ -256,8 +411,8 @@ extern "C" RJIT_HOST_EXPORT void rjit_pump(void) {
     double r = 0.0;
     char* text = 0;
     int textLen = 0;
-    if (j.isStr) {
-      ::String s = ::hxcpp_jit_r::JitNative_obj::onCallStr((int)(size_t)j.m, ::String::create(j.name, j.len), j.a0, j.a1, j.a2, j.a3);
+    if (isStr) {
+      ::String s = ::hxcpp_jit_r::JitNative_obj::onCallStr((int)(size_t)m, ::String::create(name, len), a0, a1, a2, a3);
       const char* u = s.utf8_str();
       size_t ul = u == 0 ? 0 : strlen(u);
       textLen = (int)ul;
@@ -267,11 +422,11 @@ extern "C" RJIT_HOST_EXPORT void rjit_pump(void) {
         text[ul] = 0;
       }
     } else {
-      r = ::hxcpp_jit_r::JitNative_obj::onCall((int)(size_t)j.m, ::String::create(j.name, j.len), j.a0, j.a1, j.a2, j.a3);
+      r = ::hxcpp_jit_r::JitNative_obj::onCall((int)(size_t)m, ::String::create(name, len), a0, a1, a2, a3);
     }
     {
       std::lock_guard<std::mutex> lk(rjit_job_mu);
-      if (j.active) {
+      if (j.active && j.seq == seq) {
         j.result = r;
         j.text = text;
         j.textLen = textLen;
@@ -285,36 +440,31 @@ extern "C" RJIT_HOST_EXPORT void rjit_pump(void) {
 }
 
 extern "C" RJIT_HOST_EXPORT double rjit_host_call(void* m, const char* n, int len, double a0, double a1, double a2, double a3) {
-  if (rjit_host_table == 0) return 0.0;
-  if (rjit_on_host()) return rjit_host_table->call(m, n, len, a0, a1, a2, a3);
+  RJitHost* t = rjit_host_table.load(std::memory_order_acquire);
+  if (t == 0) return 0.0;
+  if (rjit_on_host()) return t->call(m, n, len, a0, a1, a2, a3);
   return rjit_queue(m, n, len, a0, a1, a2, a3, false, 0, 0);
 }
 
 extern "C" RJIT_HOST_EXPORT const char* rjit_host_str(void* m, const char* n, int len, double a0, double a1, double a2, double a3) {
-  static thread_local ::String held;
-  if (rjit_host_table == 0) {
-    held = ::String("");
-    return held.utf8_str();
-  }
+  static thread_local std::string held;
+  held.clear();
+  RJitHost* t = rjit_host_table.load(std::memory_order_acquire);
+  if (t == 0) return held.c_str();
   if (rjit_on_host()) {
-    held = ::hxcpp_jit_r::JitNative_obj::onCallStr((int)(size_t)m, ::String::create(n, len), a0, a1, a2, a3);
-    return held.utf8_str();
+    ::String s = ::hxcpp_jit_r::JitNative_obj::onCallStr((int)(size_t)m, ::String::create(n, len), a0, a1, a2, a3);
+    const char* u = s.utf8_str();
+    if (u != 0) held.assign(u);
+    return held.c_str();
   }
   char* text = 0;
   int textLen = 0;
   rjit_queue(m, n, len, a0, a1, a2, a3, true, &text, &textLen);
-  held = text != 0 ? ::String::create(text, textLen) : ::String("");
-  if (text != 0) free(text);
-  return held.utf8_str();
-}
-
-static int rjit_tls_register(size_t size, const void* init, size_t initSize) {
-  if (rjit_tls_n >= 32) return 0;
-  int k = rjit_tls_n++;
-  rjit_tls_defs[k].size = size;
-  rjit_tls_defs[k].init = init;
-  rjit_tls_defs[k].initSize = initSize;
-  return k + 1;
+  if (text != 0) {
+    if (textLen > 0) held.assign(text, (size_t)textLen);
+    free(text);
+  }
+  return held.c_str();
 }
 ')
 @:headerCode('
@@ -379,26 +529,12 @@ class JitNative {
   }
 
   @:functionCode('
-    static RJitHost table;
-    static bool tableInit = false;
-    if (!tableInit) {
-      tableInit = true;
-      table.alloc = [](void* m, int n) -> void* { return malloc((size_t)n); };
-      table.dealloc = [](void* m, void* p) { free(p); };
-      table.log = [](void* m, const char* s, int len) { ::hxcpp_jit_r::JitNative_obj::onLog((int)(size_t)m, ::String::create(s, len)); };
-      table.call = [](void* m, const char* n, int len, double a0, double a1, double a2, double a3) -> double {
-        return ::hxcpp_jit_r::JitNative_obj::onCall((int)(size_t)m, ::String::create(n, len), a0, a1, a2, a3);
-      };
-      table.retstr = [](void* m, const char* s, int len) { ::hxcpp_jit_r::JitNative_obj::onRetStr((int)(size_t)m, ::String::create(s, len)); };
-      table.retstr2 = [](void* m, const char* s, int len) { ::hxcpp_jit_r::JitNative_obj::onRetStr2((int)(size_t)m, ::String::create(s, len)); };
-      table.get = [](void* m, const char* k, int len) -> double { return ::hxcpp_jit_r::JitNative_obj::onGet((int)(size_t)m, ::String::create(k, len)); };
-      rjit_host_table = &table;
-    }
+    rjit_host_init();
     RJitCtx* c = (RJitCtx*)malloc(sizeof(RJitCtx));
     if (c == 0) return (size_t)0;
     c->abi = abi;
     c->pad = 0;
-    c->h = &table;
+    c->h = &rjit_host_impl;
     c->m = (void*)(size_t)modId;
     return (size_t)c;
   ')
@@ -631,24 +767,31 @@ class JitNative {
   if (ty == 10) {
     unsigned long long cur = *(volatile unsigned long long*)(size_t)p;
     *(volatile unsigned long long*)(size_t)p = cur + (unsigned long long)d;
-  } else if (ty == 3) {
+    return 1;
+  }
+  if (ty == 3) {
     unsigned int cur = *(volatile unsigned int*)(size_t)p;
     *(volatile unsigned int*)(size_t)p = cur + (unsigned int)d;
-  } else if (ty == 2) {
+    return 1;
+  }
+  if (ty == 2) {
     unsigned short cur = *(volatile unsigned short*)(size_t)p;
     *(volatile unsigned short*)(size_t)p = (unsigned short)(cur + (unsigned short)((unsigned long long)d & 0xFFFF));
-  } else if (ty == 1) {
+    return 1;
+  }
+  if (ty == 1) {
     unsigned short cur = *(volatile unsigned short*)(size_t)p;
     *(volatile unsigned short*)(size_t)p = (unsigned short)(cur + (unsigned short)(((unsigned long long)d >> 16) & 0xFFFF));
+    return 1;
   }
+  return 0;
   ')
-  public static function addRel(p:cpp.SizeT, delta:Float, ty:Int):Void {}
+  public static function addRel(p:cpp.SizeT, delta:Float, ty:Int):Int return 0;
 
   @:functionCode('
 #ifdef _WIN32
     DWORD idx = TlsAlloc();
     if (idx == 0xFFFFFFFF) return -1;
-    *(volatile unsigned int*)(size_t)indexVa = (unsigned int)idx;
     size_t dataSize = (size_t)endVa > (size_t)startVa ? (size_t)endVa - (size_t)startVa : 0;
     size_t total = dataSize + (size_t)zeroFill;
     if (total == 0) total = 1;
@@ -656,6 +799,8 @@ class JitNative {
     if (block == 0) { TlsFree(idx); return -1; }
     if (dataSize > 0) memcpy(block, (const void*)(size_t)startVa, dataSize);
     if (!TlsSetValue(idx, block)) { free(block); TlsFree(idx); return -1; }
+    if (indexVa != 0) *(volatile unsigned int*)(size_t)indexVa = (unsigned int)idx;
+    rjit_win_tls_track((int)idx, block);
     return (int)idx;
 #else
     return -1;
@@ -672,6 +817,7 @@ class JitNative {
     if (block == 0) return 0;
     if (dataSize > 0) memcpy(block, (const void*)(size_t)startVa, dataSize);
     if (!TlsSetValue((DWORD)idx, block)) { free(block); return 0; }
+    rjit_win_tls_track(idx, block);
     return 1;
 #else
     return 0;
@@ -681,9 +827,8 @@ class JitNative {
 
   @:functionCode('
 #ifdef _WIN32
-    void* block = TlsGetValue((DWORD)idx);
-    if (block != 0) free(block);
     TlsSetValue((DWORD)idx, 0);
+    rjit_win_tls_release(idx);
     TlsFree((DWORD)idx);
 #endif
   ')
@@ -743,8 +888,10 @@ class JitNative {
     if (!VirtualProtect((void*)(size_t)p, (SIZE_T)size, (DWORD)prot, &old)) return -1;
     return (int)old;
 #else
-    int q = 0;
-    if ((prot & 0x04) != 0) q = 7; else if ((prot & 0x02) != 0) q = 5; else q = 1;
+    int q = ((prot & (0x02 | 0x04 | 0x20 | 0x40)) != 0 ? PROT_READ : 0)
+          | ((prot & (0x04 | 0x40)) != 0 ? PROT_WRITE : 0)
+          | ((prot & (0x10 | 0x20 | 0x40)) != 0 ? PROT_EXEC : 0);
+    if (q == 0) q = PROT_NONE;
     if (mprotect((void*)(size_t)p, (size_t)size, q) != 0) return -1;
     return 0;
 #endif
@@ -772,10 +919,10 @@ class JitNative {
   @:functionCode('return (size_t)((void*(*)())(size_t)f)();')
   public static function callPtr0(f:cpp.SizeT):cpp.SizeT return 0;
 
-  @:functionCode('return rjit_host_table ? (size_t)&rjit_host_call : 0;')
+  @:functionCode('rjit_host_init(); return (size_t)&rjit_host_call;')
   public static function hostCall():cpp.SizeT return 0;
 
-  @:functionCode('return (size_t)&rjit_host_str;')
+  @:functionCode('rjit_host_init(); return (size_t)&rjit_host_str;')
   public static function hostStr():cpp.SizeT return 0;
 
   @:functionCode('((void(*)(void*,void*))(size_t)fn)((void*)(size_t)a, (void*)(size_t)b); return 0.0;')
@@ -796,6 +943,9 @@ class JitNative {
   @:functionCode('return (int)rjit_tls_register((size_t)size, (const void*)(size_t)init, (size_t)initSize);')
   public static function tlsRegister(size:Int, init:cpp.SizeT, initSize:Int):Int return 0;
 
+  @:functionCode('rjit_tls_unregister(id); return 0.0;')
+  public static function tlsUnregister(id:Int):Float return 0;
+
   @:functionCode('
     size_t idx[2];
     idx[0] = (size_t)id;
@@ -814,8 +964,11 @@ class JitNative {
   public static function getProcGlobal(name:String):cpp.SizeT return 0;
 
   @:functionCode('
+    if (p == 0 || size <= 0) return;
 #ifdef _WIN32
     FlushInstructionCache(GetCurrentProcess(), (const void*)(size_t)p, (SIZE_T)size);
+#elif defined(__GNUC__) || defined(__clang__)
+    __builtin___clear_cache((char*)(size_t)p, (char*)((size_t)p + (size_t)size));
 #endif
   ')
   public static function flushIcache(p:cpp.SizeT, size:Int):Void {}
@@ -934,11 +1087,17 @@ class JitNative {
     MEMORY_BASIC_INFORMATION mbi;
     if (VirtualQuery((const void*)(size_t)p, &mbi, sizeof(mbi)) == 0) return 0;
     if (mbi.State != 0x1000) return 0;
+    if ((mbi.Protect & 0x100) != 0) return 0;
     DWORD prot = mbi.Protect & 0xFF;
     if (prot == 0x01 || prot == 0x00) return 0;
     return 1;
 #else
-    return p != 0 ? 1 : 0;
+    if (p == 0) return 0;
+    long ps = sysconf(_SC_PAGESIZE);
+    if (ps <= 0) return 0;
+    void* page = (void*)((size_t)p & ~((size_t)ps - 1));
+    if (msync(page, (size_t)ps, MS_ASYNC) != 0) return 0;
+    return 1;
 #endif
   ')
   public static function isReadable(p:cpp.SizeT):Int return 0;

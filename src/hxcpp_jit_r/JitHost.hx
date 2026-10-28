@@ -17,7 +17,13 @@ class JitHost {
 
   static function sync<T>(f:Void->T):T {
     lock.acquire();
-    var r = f();
+    var r:T = null;
+    try {
+      r = f();
+    } catch (e:Dynamic) {
+      lock.release();
+      throw e;
+    }
     lock.release();
     return r;
   }
@@ -73,9 +79,11 @@ class JitHost {
   }
 
   public static function takeRet(id:Int):String {
-    var r = sync(function() return rets.get(id));
-    sync(function() { rets.remove(id); return true; });
-    return r == null ? "" : r;
+    return sync(function() {
+      var r = rets.get(id);
+      rets.remove(id);
+      return r == null ? "" : r;
+    });
   }
 
   public static function error(method:String, name:String, msg:String):Void {
@@ -101,9 +109,11 @@ class JitHost {
   }
 
   public static function takeRet2(id:Int):String {
-    var r = sync(function() return ret2.get(id));
-    sync(function() { ret2.remove(id); return true; });
-    return r == null ? "" : r;
+    return sync(function() {
+      var r = ret2.get(id);
+      ret2.remove(id);
+      return r == null ? "" : r;
+    });
   }
 
   public static function onGet(id:Int, key:String):Float {
