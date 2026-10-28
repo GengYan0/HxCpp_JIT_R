@@ -54,7 +54,7 @@ class JitScan {
     return [
     "int", "unsigned", "long", "short", "char", "bool", "float", "double", "size_t",
     "int8_t", "int16_t", "int32_t", "int64_t", "uint8_t", "uint16_t", "uint32_t", "uint64_t",
-      "intptr_t", "uintptr_t", "ptrdiff_t"
+      "intptr_t", "uintptr_t", "ptrdiff_t", "unsigned long", "signed int", "unsigned int"
     ];
   }
 
@@ -107,8 +107,24 @@ class JitScan {
         i += 2;
         continue;
       }
-      if (c == 34 || c == 39) {
+      if (c == 34) {
         inStr = c;
+        b.addChar(c);
+        i++;
+        continue;
+      }
+      if (c == 39) {
+        var close = i + 2;
+        if (close < n && d == 92) close = i + 3;
+        if (close < n && src.charCodeAt(close) == 39) {
+          var k = i;
+          while (k <= close) {
+            b.addChar(src.charCodeAt(k));
+            k++;
+          }
+          i = close + 1;
+          continue;
+        }
         b.addChar(c);
         i++;
         continue;
@@ -323,7 +339,7 @@ class JitScan {
             structName = st.name;
             size = sz;
           } else {
-            if (c == "v" || c == "?") continue;
+            if (c == "v" || c == "?" || c == "S" || c == "R" || c == "W") continue;
             kind = "array";
             elem = c;
             size = sz;
@@ -447,9 +463,14 @@ class JitScan {
     while (s.indexOf("  ") >= 0) s = s.split("  ").join(" ");
     if (s == "") return "v";
     if (s == "void") return "v";
-    if (s.indexOf("std::string") >= 0) return s.indexOf("&") >= 0 ? "R" : "S";
+    if (s.indexOf("std::string") >= 0 && s.indexOf("*") < 0) return s.indexOf("&") >= 0 ? "R" : "S";
     if (s.indexOf("*") >= 0) {
-      if (s.indexOf("char") >= 0) return "s";
+      var stars = 0;
+      for (i in 0...s.length) if (s.charCodeAt(i) == 42) stars++;
+      if (stars != 1) return "p";
+      var base = StringTools.trim(s.substr(0, s.indexOf("*")));
+      base = StringTools.trim(StringTools.replace(base, "const", ""));
+      if (base == "char") return "s";
       return "p";
     }
     if (s == "double") return "d";
@@ -457,8 +478,8 @@ class JitScan {
     if (s == "bool") return "b";
     if (s == "char" || s == "signed char" || s == "unsigned char") return "c";
     if (s == "short" || s == "short int" || s == "signed short" || s == "unsigned short") return "h";
-    if (s == "unsigned" || s == "unsigned int" || s == "unsigned long") return "u";
-    if (s == "long long" || s == "unsigned long long" || s == "int64_t" || s == "uint64_t" || s == "long") return "l";
+    if (s == "unsigned" || s == "unsigned int" || s == "signed int") return "u";
+    if (s == "long long" || s == "unsigned long long" || s == "int64_t" || s == "uint64_t" || s == "long" || s == "unsigned long") return "l";
     if (isNumeric(s, numerics())) return "i";
     return "?";
   }

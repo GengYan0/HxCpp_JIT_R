@@ -39,6 +39,11 @@ class JitToolchain {
       d.error = "toolchain disabled by forceUnavailable";
       return d;
     }
+    if (!JitPlatform.win && Sys.systemName() != "Linux") {
+      var d = new JitToolchain();
+      d.error = "unsupported platform " + Sys.systemName();
+      return d;
+    }
     return JitPlatform.win ? detectWindows(prefer) : detectPosix(prefer);
   }
 

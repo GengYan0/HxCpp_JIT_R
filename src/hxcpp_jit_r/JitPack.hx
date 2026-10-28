@@ -35,10 +35,11 @@ class JitPack {
   }
 
   static function platform():String {
+    var arch = #if HXCPP_M32 "x86" #else "x64" #end;
     return switch (Sys.systemName()) {
-      case "Windows": "windows-x64";
-      case "Mac": "macos";
-      default: "linux";
+      case "Windows": "windows-" + arch;
+      case "Mac": "macos-" + arch;
+      default: "linux-" + arch;
     };
   }
 
@@ -59,14 +60,12 @@ class JitPack {
       mkdirs(target + "/" + d);
       for (f in safeList(p)) {
         if (!isPayload(f)) continue;
-        copyFile(p + "/" + f, target + "/" + d + "/" + f);
-        n++;
+        if (copyFile(p + "/" + f, target + "/" + d + "/" + f)) n++;
       }
     }
     var h = root + "/rjit_abi.h";
     if (FileSystem.exists(h)) {
-      copyFile(h, target + "/rjit_abi.h");
-      n++;
+      if (copyFile(h, target + "/rjit_abi.h")) n++;
     }
     File.saveContent(target + "/manifest.json", manifest(root));
     return n;
@@ -97,8 +96,7 @@ class JitPack {
           n++;
           continue;
         }
-        copyFile(p + "/" + f, dst);
-        n++;
+        if (copyFile(p + "/" + f, dst)) n++;
       }
     }
     var h = src + "/rjit_abi.h";
@@ -146,10 +144,13 @@ class JitPack {
     return "pack ok: abi=" + Reflect.field(o, "abi") + " codegen=" + Reflect.field(o, "codegen") + " platform=" + Reflect.field(o, "platform") + " modules=" + n + " bytes=" + Std.int(bytes);
   }
 
-  static function copyFile(a:String, b:String):Void {
+  static function copyFile(a:String, b:String):Bool {
     try {
       File.saveBytes(b, File.getBytes(a));
-    } catch (e:Dynamic) {}
+      return true;
+    } catch (e:Dynamic) {
+      return false;
+    }
   }
 
   static function safeList(p:String):Array<String> {
