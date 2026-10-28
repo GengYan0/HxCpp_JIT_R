@@ -1003,6 +1003,20 @@ double apply2(int (*f)(int), double v) { return (double)f((int)v); }
     }
     eq("concurrent calls agree", Std.string(slots[0] + slots[1]), "79600");
 
+    head("cache cleanup");
+    var pm2 = Jit.compile("prune", "double one() { return 1; }\n");
+    ok("prune module compiles", pm2.ok, pm2.diag.length > 0 ? JitCompiler.describe(pm2.diag[0]) : "");
+    var kdir = Jit.cache.dirFor(pm2.key);
+    for (i in 0...4) Jit.reload("prune", {force: true});
+    for (i in 0...8) Jit.tick();
+    var stray = kdir + "/mod" + Jit.cache.ext() + ".123.tmp";
+    sys.io.File.saveContent(stray, "x");
+    var freed = Jit.clean();
+    var bins = [for (f in sys.FileSystem.readDirectory(kdir)) if (StringTools.endsWith(f, Jit.cache.ext())) f];
+    ok("old binaries pruned", bins.length <= 2, bins.join(","));
+    ok("clean drops temp files", freed > 0 && !sys.FileSystem.exists(stray), "freed=" + freed);
+    ok("clean keeps the newest binary", sys.FileSystem.exists(Jit.cache.dllFor(pm2.key) ?? ""), "");
+
     head("throughput");
     var pm = Jit.compile("perf", "RJIT(mix) { double s = 0; for (int i = 0; i < 8; i++) s += (double)i * RJIT_A0; return s; }\n");
     var reps = 500000;

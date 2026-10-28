@@ -814,6 +814,13 @@ class Jit {
     return cache == null ? 0 : cache.purge();
   }
 
+  public static function clean(keep:Int = 2):Int {
+    if (cache == null) return 0;
+    var n = 0;
+    for (k in cache.keys()) n += cache.prune(k, keep);
+    return n;
+  }
+
   public static function sweep(keep:Int = 8):Int {
     if (cache == null) return 0;
     var live = new Map<String, Bool>();

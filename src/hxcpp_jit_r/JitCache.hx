@@ -72,6 +72,44 @@ class JitCache {
     return top == 0 ? d + "/mod" + e : d + "/mod" + (top + 1) + e;
   }
 
+  public function keys():Array<String> {
+    var out:Array<String> = [];
+    for (f in list(root)) {
+      if (FileSystem.isDirectory(root + "/" + f)) out.push(f);
+    }
+    return out;
+  }
+
+  public function prune(key:String, keep:Int = 2):Int {
+    var d = dirFor(key);
+    var e = ext();
+    var bins:Array<{p:String, n:Int}> = [];
+    var n = 0;
+    for (f in list(d)) {
+      var p = d + "/" + f;
+      if (StringTools.endsWith(f, ".tmp")) {
+        if (del(p)) n++;
+        continue;
+      }
+      if (!StringTools.startsWith(f, "mod") || !StringTools.endsWith(f, e)) continue;
+      var mid = f.substr(3, f.length - 3 - e.length);
+      bins.push({p: p, n: mid == "" ? 1 : (Std.parseInt(mid) ?? 0)});
+    }
+    if (bins.length <= keep) return n;
+    bins.sort(function(a, b) return a.n - b.n);
+    for (i in 0...(bins.length - keep)) if (del(bins[i].p)) n++;
+    return n;
+  }
+
+  static function del(p:String):Bool {
+    try {
+      FileSystem.deleteFile(p);
+      return true;
+    } catch (e:Dynamic) {
+      return false;
+    }
+  }
+
   public function purge():Int {
     var n = 0;
     for (f in list(root)) {

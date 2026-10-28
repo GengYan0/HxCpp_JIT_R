@@ -187,6 +187,7 @@ class JitCompiler {
       ok = FileSystem.exists(out);
     }
     if (FileSystem.exists(tmpOut)) try FileSystem.deleteFile(tmpOut) catch (e:Dynamic) {}
+    if (ok) cache.prune(key, 2);
     return {
       ok: ok,
       dll: ok ? JitCache.normalize(out) : "",

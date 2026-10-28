@@ -1,6 +1,6 @@
 # HxCpp_JIT_R
 
-0.1.11
+0.1.12
 
 Compile and call native C++ while your application is running. Hand it a source string, get a module back, call its functions like any Haxe method.
 
@@ -37,6 +37,7 @@ Behind the call the source goes into a cache directory, is compiled into a share
 - Content-addressed build cache with `exportPack` / `importPack` for machines without a compiler
 - Host bookkeeping behind a mutex, so calls, bindings and string returns work from several threads
 - A compiled artifact is written under a temporary name and moved into place, so concurrent builders do not corrupt each other
+- A build keeps the two newest binaries of a module and drops leftover temporaries, so reloading does not grow the cache; `Jit.clean()` prunes every module directory
 - A handle taken before `dispose` reports `valid() == false` and returns zero instead of jumping into an unloaded image
 - A module whose source contains `throw`, `catch` or `try` is loaded through the system loader even when manual mapping is requested, because a hand mapped image cannot unwind a C++ exception
 - Manual image mapping as an alternative to `LoadLibrary`, with the same control on Linux over ELF
@@ -177,6 +178,7 @@ The standard library, inline assembly, SIMD intrinsics and templates all work. T
 | `Jit.packInfo(dir):String` | Validate a package |
 | `Jit.get(name)` / `Jit.all()` / `Jit.dispose(name)` | Module management |
 | `Jit.tick()` | Per-frame driver: async results, deferred unload, file polling |
+| `Jit.clean(?keep)` / `Jit.sweep(?keep)` | Drop old binaries and temporaries, or whole unused module directories |
 | `Jit.hook()` | Attach `tick` to the host frame event |
 | `Jit.bind(name, fn)` / `Jit.unbind(name)` | Register host callbacks |
 | `Jit.stats()` / `Jit.purge()` / `Jit.sweep(keep)` | Status and cleanup |
@@ -824,7 +826,7 @@ Time goes into compiler process startup and linking, not into the amount of code
 
 ## Testing
 
-`test/` is a standalone console project with 397 assertions.
+`test/` is a standalone console project with 401 assertions.
 
 `example/` is a two file project that compiles a module and calls it:
 
