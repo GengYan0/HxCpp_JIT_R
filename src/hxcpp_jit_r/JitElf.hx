@@ -23,6 +23,9 @@ typedef ElfInfo = {
   var phoff:Float;
   var phentsize:Int;
   var phnum:Int;
+  var shoff:Float;
+  var shentsize:Int;
+  var shnum:Int;
   var phdrs:Array<ElfPhdr>;
 }
 
@@ -95,6 +98,9 @@ class JitElf {
       phoff: 0,
       phentsize: 0,
       phnum: 0,
+      shoff: 0,
+      shentsize: 0,
+      shnum: 0,
       phdrs: []
     };
     if (!isElf(b)) {
@@ -115,6 +121,9 @@ class JitElf {
     info.phoff = u64(b, 32);
     info.phentsize = b.getUInt16(54);
     info.phnum = b.getUInt16(56);
+    info.shoff = u64(b, 40);
+    info.shentsize = b.getUInt16(58);
+    info.shnum = b.getUInt16(60);
     if (info.phnum == 0 || info.phentsize < 56) {
       info.error = "missing program headers";
       return info;
@@ -259,6 +268,11 @@ class JitElf {
       img.error = "mapping " + total + " bytes failed";
       return img;
     }
+    img.base = alloc;
+    img.alloc = alloc;
+    img.allocSize = total;
+    img.sizeOfImage = total;
+    img.pe32plus = true;
     var baseF = JitNative.toFloat(alloc) - minVa;
     var src = JitLoader.ptrOf(bytes);
     var tlsId = 0;
@@ -270,6 +284,7 @@ class JitElf {
         JitLoader.releaseImage(img);
         return img;
       }
+      img.tlsIndex = tlsId;
     }
     for (ph in loads) {
       var dst = JitNative.toSizeT(baseF + ph.vaddr);
@@ -281,12 +296,8 @@ class JitElf {
       var z = Std.int(ph.memsz - ph.filesz);
       if (z > 0) JitNative.memzero(JitNative.toSizeT(baseF + ph.vaddr + ph.filesz), z);
     }
-    img.base = JitNative.toSizeT(baseF);
-    img.alloc = alloc;
-    img.allocSize = total;
-    img.sizeOfImage = total;
-    img.pe32plus = true;
     img.entry = Std.int(info.entry);
+    img.base = JitNative.toSizeT(baseF);
     img.manual = true;
     img.ok = true;
 
@@ -358,7 +369,18 @@ class JitElf {
       }
     }
 
-    var symCount = symbolCount(baseF, hashVa, gnuHashVa);
+    var symCount = sectionSymCount(bytes, info);
+    if (symCount <= 0) symCount = symbolCount(baseF, hashVa, gnuHashVa);
+    if (symtabVa != 0 && (symtabVa < 0 || symtabVa + symCount * 24 > img.sizeOfImage)) {
+      img.error = "symbol table outside the image";
+      JitLoader.releaseImage(img);
+      return img;
+    }
+    if (strtabVa != 0 && (strtabVa < 0 || strtabVa >= img.sizeOfImage)) {
+      img.error = "string table outside the image";
+      JitLoader.releaseImage(img);
+      return img;
+    }
 
     if (!applyRela(img, baseF, symtabVa, strtabVa, symCount, relaVa, relaSz, false, tlsId)) {
       JitLoader.releaseImage(img);
@@ -388,18 +410,38 @@ class JitElf {
     }
 
     collectExports(img, baseF, symtabVa, strtabVa, symCount);
-    img.initVa = JitNative.toSizeT(baseF + initVa);
-    img.finiVa = JitNative.toSizeT(baseF + finiVa);
-    img.initArr = JitNative.toSizeT(baseF + initArrVa);
+    img.initVa = addrOf(baseF, initVa);
+    img.finiVa = addrOf(baseF, finiVa);
+    img.initArr = addrOf(baseF, initArrVa);
     img.initArrSize = Std.int(initArrSz);
-    img.finiArr = JitNative.toSizeT(baseF + finiArrVa);
+    img.finiArr = addrOf(baseF, finiArrVa);
     img.finiArrSize = Std.int(finiArrSz);
 
+    JitNative.flushIcache(alloc, total);
     runInitArray(img.initArr, img.initArrSize);
     if (img.initVa != 0) JitNative.callInit(img.initVa);
-    JitNative.flushIcache(alloc, total);
     JitLoader.track(img);
     return img;
+  }
+
+  static inline function addrOf(baseF:Float, va:Float):cpp.SizeT {
+    return va == 0 ? 0 : JitNative.toSizeT(baseF + va);
+  }
+
+  static function sectionSymCount(b:haxe.io.Bytes, info:ElfInfo):Int {
+    if (info.shnum <= 0 || info.shentsize < 64) return 0;
+    var off = Std.int(info.shoff);
+    if (off <= 0 || off + info.shnum * info.shentsize > b.length) return 0;
+    for (i in 0...info.shnum) {
+      var o = off + i * info.shentsize;
+      if (b.getInt32(o + 4) != 11) continue;
+      var entsize = u64(b, o + 56);
+      var size = u64(b, o + 32);
+      if (entsize < 24 || size <= 0) return 0;
+      var n = Std.int(size / entsize);
+      return n > 0 && n < 4000000 ? n : 0;
+    }
+    return 0;
   }
 
   static function symbolCount(baseF:Float, hash:Float, gnuHash:Float):Int {
@@ -440,18 +482,27 @@ class JitElf {
     var ent = relStyle ? 16 : 24;
     var n = Std.int(size / ent);
     if (n <= 0) return true;
+    if (va < 0 || va + size > img.sizeOfImage) {
+      img.error = "relocation table outside the image";
+      return false;
+    }
     var p = memAt(baseF, va);
+    var limit = img.sizeOfImage;
     for (i in 0...n) {
       var e = JitNative.toSizeT(JitNative.toFloat(p) + i * ent);
       var off = mpeek(e, 8);
       var info0 = mpeek(JitNative.toSizeT(JitNative.toFloat(e) + 8), 8);
       var symIdx = Std.int(info0 / 4294967296.0);
       var ty = Std.int(info0 - symIdx * 4294967296.0) & 0xFFFF;
+      if (ty == 0) continue;
+      if (off < 0 || off + 8 > limit) {
+        img.error = "relocation target outside the image at " + Std.int(off);
+        return false;
+      }
       var addend = relStyle
         ? mpeek(memAt(baseF, off), 8)
         : mpeek(JitNative.toSizeT(JitNative.toFloat(e) + 16), 8);
       var target = memAt(baseF, off);
-      if (ty == 0) continue;
       if (ty == 16 || ty == 1028) {
         JitNative.poke(target, 8, tlsId * 1.0);
         img.relocCount++;
@@ -467,8 +518,23 @@ class JitElf {
         img.relocCount++;
         continue;
       }
+      if (ty == 37 || ty == 1032) {
+        var slot = addend;
+        if (slot < 0 || slot + 8 > limit) {
+          img.error = "ifunc target outside the image";
+          return false;
+        }
+        var f = JitNative.callPtr0(JitNative.toSizeT(baseF + slot));
+        JitNative.poke(target, 8, JitNative.toFloat(f));
+        img.relocCount++;
+        continue;
+      }
       if (symIdx <= 0) {
         img.error = "relocation without symbol at offset " + Std.int(off);
+        return false;
+      }
+      if (symtab == 0 || strtab == 0) {
+        img.error = "relocation needs a symbol table the image does not expose";
         return false;
       }
       if (symCount > 0 && symIdx >= symCount) {
@@ -484,8 +550,15 @@ class JitElf {
       var isIfunc = (stInfo & 0x0F) == 10;
       var sVal = 0.0;
       if (shndx != 0 && value != 0) {
-        sVal = baseF + value;
-        if (isIfunc) sVal = JitNative.toFloat(JitNative.callPtr0(JitNative.toSizeT(sVal)));
+        if (shndx == 0xfff1) {
+          sVal = value;
+        } else if (shndx >= 0xff00) {
+          img.error = "unsupported special symbol " + (name == "" ? "#" + symIdx : name);
+          return false;
+        } else {
+          sVal = baseF + value;
+          if (isIfunc) sVal = JitNative.toFloat(JitNative.callPtr0(JitNative.toSizeT(sVal)));
+        }
       } else if (name != "") {
         sVal = name == "__tls_get_addr"
           ? JitNative.toFloat(JitNative.tlsAddr())
@@ -506,7 +579,13 @@ class JitElf {
         JitNative.poke(target, 8, sVal);
       } else if (ty == R_X86_64_COPY) {
         var sz = Std.int(mpeek(JitNative.toSizeT(JitNative.toFloat(symE) + 16), 8));
-        if (sz > 0) JitNative.memcpyRaw(target, JitNative.toSizeT(sVal), sz);
+        if (sz > 0) {
+          if (off + sz > limit) {
+            img.error = "copy relocation larger than the image";
+            return false;
+          }
+          JitNative.memcpyRaw(target, JitNative.toSizeT(sVal), sz);
+        }
       } else if (isTlsReloc(ty)) {
         img.needsLoader = true;
         img.error = "image addresses thread-local storage through the thread pointer";
@@ -526,13 +605,18 @@ class JitElf {
       var symE = memAt(baseF, symtab + i * 24);
       var nameOff = Std.int(mpeek(symE, 4));
       if (nameOff == 0) continue;
+      var stInfo = Std.int(mpeek(JitNative.toSizeT(JitNative.toFloat(symE) + 4), 1));
+      if ((stInfo & 0x0F) == 6) continue;
       var shndx = Std.int(mpeek(JitNative.toSizeT(JitNative.toFloat(symE) + 6), 2));
-      if (shndx == 0) continue;
+      if (shndx == 0 || shndx >= 0xff00) continue;
       var value = mpeek(JitNative.toSizeT(JitNative.toFloat(symE) + 8), 8);
       if (value == 0) continue;
       var name = readMemStr(memAt(baseF, strtab + nameOff));
       if (name == "" || img.exports.exists(name)) continue;
-      img.exports.set(name, Std.int(value));
+      var addr = (stInfo & 0x0F) == 10
+        ? JitNative.toFloat(JitNative.callPtr0(JitNative.toSizeT(baseF + value)))
+        : baseF + value;
+      img.exports.set(name, addr);
     }
   }
 
