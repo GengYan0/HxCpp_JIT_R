@@ -375,6 +375,16 @@ int ids[3];
       ok("manual second module", top.ok, top.diag.length > 0 ? JitCompiler.describe(top.diag[0]) : "");
       eq("manual tri", Std.string(top.callAuto("tri", [5])), "15");
       Jit.dispose("man2");
+      ok("manual unwind table", img.fnTable != 0, "entries=" + img.fnCount);
+      var mth = Jit.compile("manthrow", '#include <stdexcept>
+double boom(double v) { if (v > 0) throw std::runtime_error("mapped"); return v; }
+', {loader: "manual"});
+      ok("manual throw module", mth.ok, mth.diag.length > 0 ? JitCompiler.describe(mth.diag[0]) : "");
+      ok("manual throw uses the system loader", mth.image == null, mth.image == null ? "" : "mapped=" + mth.image.manual);
+      JitHost.capture = true;
+      eq("manual throw trapped", Std.string(mth.callAuto("boom", [1])), "0");
+      eq("manual throw quiet path", Std.string(mth.callAuto("boom", [-1])), "-1");
+      ok("manual throw message", JitHost.logs.join(" ").indexOf("mapped") >= 0, JitHost.logs.join("|"));
     } else {
       ok("manual mapped", false, "image missing");
     }

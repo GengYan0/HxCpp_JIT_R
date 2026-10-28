@@ -597,6 +597,11 @@ class Jit {
     #end
   }
 
+  static function usesExceptions(src:String):Bool {
+    if (src == null) return false;
+    return src.indexOf("throw") >= 0 || src.indexOf("catch") >= 0 || src.indexOf("try {") >= 0;
+  }
+
   static function sym(image:JitImage, h:cpp.SizeT, n:String):cpp.SizeT {
     return image != null ? JitLoader.proc(image, n) : JitNative.getProc(h, n);
   }
@@ -604,7 +609,12 @@ class Jit {
   static function load(m:JitModule, dll:String):Bool {
     if (debug) log("[jit] load 1 " + dll);
     var h:cpp.SizeT = 0;
-    if (loader == "auto" || loader == "manual") {
+    var map = loader == "auto" || loader == "manual";
+    if (map && usesExceptions(m.src)) {
+      map = false;
+      log("[jit] manual mapping cannot unwind C++ exceptions, using the system loader");
+    }
+    if (map) {
       var image = JitLoader.load(dll);
       if (image.ok) {
         m.image = image;

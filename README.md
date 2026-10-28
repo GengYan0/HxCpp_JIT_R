@@ -1,6 +1,6 @@
 # HxCpp_JIT_R
 
-0.1.8
+0.1.9
 
 Compile and call native C++ while your application is running. Hand it a source string, get a module back, call its functions like any Haxe method.
 
@@ -36,6 +36,7 @@ Behind the call the source goes into a cache directory, is compiled into a share
 - Host bookkeeping behind a mutex, so calls, bindings and string returns work from several threads
 - A compiled artifact is written under a temporary name and moved into place, so concurrent builders do not corrupt each other
 - A handle taken before `dispose` reports `valid() == false` and returns zero instead of jumping into an unloaded image
+- A module whose source contains `throw`, `catch` or `try` is loaded through the system loader even when manual mapping is requested, because a hand mapped image cannot unwind a C++ exception
 - Manual image mapping as an alternative to `LoadLibrary`, with the same control on Linux over ELF
 - Asynchronous compilation with a concurrency gate
 - Diagnostics mapped back to the original source line
@@ -806,6 +807,7 @@ Time goes into compiler process startup and linking, not into the amount of code
 - Every guarded call costs an indirect jump; `callFast` removes the SEH guard but also removes crash containment
 - Compilation needs a local compiler; target machines fall back to the cache
 - A C++ exception thrown by compiled code is caught at the boundary, reported as a failed call, and its `what()` text is written to the log
+- The exception handler of a hand mapped image is never reached: its unwind table is registered and lookups against it succeed, but the C++ runtime does not dispatch into the mapped copy, so such sources go through the system loader instead
 - Build timeout terminates the compiler process
 - Struct accessors cover leaf fields up to three levels of nesting, including pointer, `const char*` and `std::string` members
 - Manual mapping handles PE on Windows and ELF64 on Linux; other formats use the system loader
@@ -820,7 +822,7 @@ Time goes into compiler process startup and linking, not into the amount of code
 
 ## Testing
 
-`test/` is a standalone console project with 390 assertions.
+`test/` is a standalone console project with 396 assertions.
 
 ```
 cd test
@@ -828,7 +830,7 @@ haxe build.hxml
 bin/Main.exe
 ```
 
-Covers: core calls, diagnostic line numbers, expression offset, automatic signatures, string arguments, string and `RJIT_RETSTR` results, struct and array access, struct arrays and nested fields, pointer, string and `std::string` members, scalar and struct references, expressions with bitwise and string values, bound handles, overlapping signatures, default arguments, callDyn overload choice, trapped C++ exceptions, multiple translation units and their globals, pointer variables and address-of, bulk transfer, session state including struct arrays, crash isolation and error callback, pointer handle, concurrency gate, hot reload, file watch, large source, cache hit, cache packaging and import, compiler-less mode, manual mapping and unload, ELF header parsing, thread-local blocks, packed relocations, call throughput.
+Covers: core calls, diagnostic line numbers, expression offset, automatic signatures, string arguments, string and `RJIT_RETSTR` results, struct and array access, struct arrays and nested fields, pointer, string and `std::string` members, scalar and struct references, expressions with bitwise and string values, bound handles, overlapping signatures, default arguments, callDyn overload choice, trapped C++ exceptions, multiple translation units and their globals, pointer variables and address-of, bulk transfer, session state including struct arrays, crash isolation and error callback, pointer handle, concurrency gate, hot reload, file watch, large source, cache hit, cache packaging and import, compiler-less mode, manual mapping and unload, unwind table registration, system loader fallback for exceptions, ELF header parsing, thread-local blocks, packed relocations, call throughput.
 
 Linux:
 

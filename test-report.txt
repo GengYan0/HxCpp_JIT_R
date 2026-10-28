@@ -1,5 +1,5 @@
 [jit] backend=msvc exe=C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/VC/Tools/MSVC/14.29.30133/bin/HostX64/x64/cl.exe arch=x64 origin=C:/Program Files (x86)/Microsoft Visual Studio/2019/Community
-  PASS setup ready  2ms
+  PASS setup ready  1ms
 
 == backend fallback ==
   PASS request clang  resolved backend=msvc
@@ -16,7 +16,7 @@
   PASS host log
   PASS fib(30)
   PASS undefined fn
-  PASS address  0x21000
+  PASS address  0x11000
   PASS symbols
 
 == diagnostics line accuracy ==
@@ -30,13 +30,13 @@
   PASS eval diag line == 2
 
 == session ==
-[jit] sess ok (128ms) [a]
+[jit] sess ok (111ms) [a]
   PASS session eval 1
   PASS session a
-[jit] sess ok (113ms) [a,b]
+[jit] sess ok (116ms) [a,b]
   PASS session eval 2
   PASS session b sees a
-[jit] sess ok (114ms) [a,b,c]
+[jit] sess ok (109ms) [a,b,c]
   PASS session eval 3
   PASS session var bridge
 [jit] sess ok (114ms) [a]
@@ -44,15 +44,15 @@
   PASS session a redeclared
 
 == parallel compile gate ==
-[jit] par0 ok (async 113ms)
-[jit] par1 ok (async 239ms)
-[jit] par2 ok (async 347ms)
-[jit] par3 ok (async 329ms)
-[jit] par4 ok (async 316ms)
-[jit] par5 ok (async 318ms)
-[jit] par6 ok (async 321ms)
-[jit] par7 ok (async 299ms)
-[jit] par8 ok (async 298ms)
+[jit] par0 ok (async 114ms)
+[jit] par1 ok (async 226ms)
+[jit] par2 ok (async 341ms)
+[jit] par3 ok (async 321ms)
+[jit] par4 ok (async 311ms)
+[jit] par5 ok (async 312ms)
+[jit] par6 ok (async 315ms)
+[jit] par7 ok (async 302ms)
+[jit] par8 ok (async 306ms)
   PASS all jobs finished  9/9
   PASS peak <= maxParallel  peak=3
   PASS peak >= 2  peak=3
@@ -61,14 +61,14 @@
 
 == hot reload stress ==
 [jit] hotstress ok (cached) [v]
-[jit] hotstress ok (141ms) [v]
-[jit] hotstress ok (105ms) [v]
-[jit] hotstress ok (108ms) [v]
-[jit] hotstress ok (110ms) [v]
+[jit] hotstress ok (107ms) [v]
+[jit] hotstress ok (118ms) [v]
+[jit] hotstress ok (114ms) [v]
+[jit] hotstress ok (138ms) [v]
+[jit] hotstress ok (107ms) [v]
 [jit] hotstress ok (111ms) [v]
-[jit] hotstress ok (106ms) [v]
 [jit] hotstress ok (109ms) [v]
-[jit] hotstress ok (111ms) [v]
+[jit] hotstress ok (106ms) [v]
   PASS reload final value
   PASS modules alive  12 modules
 
@@ -110,15 +110,15 @@
   PASS unknown var rejected
 
 == session state across evals ==
-[jit] state ok (114ms)
+[jit] state ok (111ms)
   PASS state eval 1
   PASS heal(5)
-[jit] state ok (112ms)
+[jit] state ok (141ms)
   PASS state eval 2
   PASS hp survived recompile
   PASS dmg(3)
   PASS hp after dmg
-[jit] state ok (118ms)
+[jit] state ok (114ms)
   PASS state eval 3
   PASS bonus(2) sees hp
 
@@ -129,7 +129,7 @@
   PASS onError fired
 
 == pointer handle ==
-  PASS fn ptr not null  JitPtr(0x0000A0311030)
+  PASS fn ptr not null  JitPtr(0x0000AB7D1030)
   PASS ptr format
   PASS null ptr
 
@@ -190,7 +190,7 @@
 [jit] ptrs ok (cached)
   PASS pointer compile
   PASS kind ptr
-  PASS ptr reads as address  140722931994624
+  PASS ptr reads as address  140723113594880
   PASS addrOf value equals ptr
   PASS addrOf differs
   PASS read through ptr
@@ -227,10 +227,10 @@
   PASS unknown field nan
 
 == aggregate state across eval ==
-[jit] aggstate ok (112ms)
+[jit] aggstate ok (115ms)
   PASS agg eval 1
   PASS agg session x
-[jit] aggstate ok (113ms)
+[jit] aggstate ok (115ms)
   PASS agg eval 2
   PASS agg survived recompile
 
@@ -243,6 +243,16 @@
 [jit] man2 ok (cached)
   PASS manual second module
   PASS manual tri
+  PASS manual unwind table  entries=331
+[jit] manual mapping cannot unwind C++ exceptions, using the system loader
+[jit] manthrow ok (cached)
+  PASS manual throw module
+  PASS manual throw uses the system loader
+[jit] mapped
+[jit] callAuto boom: native exception caught
+  PASS manual throw trapped
+  PASS manual throw quiet path
+  PASS manual throw message  hello|mapped
   PASS manual unloaded  base=6442450944 images=0
 [jit] loadlib ok (cached)
   PASS loadlib still works
@@ -266,13 +276,14 @@
 [jit] par7 ok (cached) [v]
 [jit] crash ok (cached)
 [jit] par8 ok (cached) [v]
+[jit] manthrow ok (cached)
 [jit] eval_1E2E198C ok (cached) [__e]
 [jit] loadlib ok (cached)
 [jit] core ok (cached) [add,mul,mix,greet,fib,cpponly]
 [jit] par0 ok (cached) [v]
 [jit] auto ok (cached)
-  PASS export files  157 files
-  PASS pack manifest ok  pack ok: abi=9 codegen=27 platform=windows-x64 modules=95 bytes=9018368
+  PASS export files  688 files
+  PASS pack manifest ok  pack ok: abi=9 codegen=27 platform=windows-x64 modules=488 bytes=45763072
   PASS manifest exists
   PASS headline dll packed
 
@@ -298,6 +309,7 @@
 [jit] par7 ok (cached) [v]
 [jit] par8 ok (cached) [v]
 [jit] crash ok (cached)
+[jit] manthrow ok (cached)
 [jit] eval_1E2E198C ok (cached) [__e]
 [jit] auto ok (cached)
 [jit] par0 ok (cached) [v]
@@ -306,7 +318,7 @@
 [jit] toolchain disabled by forceUnavailable (cache-only mode)
   PASS toolchain disabled  toolchain disabled by forceUnavailable
   PASS no cache yet fails  jit: error E_TOOLCHAIN toolchain disabled by forceUnavailable
-  PASS import files  8173 files
+  PASS import files  8619 files
 [jit] cold ok (cached, no toolchain)
   PASS cache-only hit  cached=true
   PASS cache-only call
@@ -328,12 +340,12 @@
 
 == concurrent cold build ==
 [jit] backend=msvc exe=C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/VC/Tools/MSVC/14.29.30133/bin/HostX64/x64/cl.exe arch=x64 origin=environment
-  PASS cold cache switched  C:\Users\Administrator\AppData\Local\Temp\rjitconc_-2102119945_295
-[jit] conc0 ok (async 293ms)
-[jit] conc1 ok (async 415ms)
-[jit] conc2 ok (async 621ms)
-[jit] conc3 ok (async 444ms)
-  PASS concurrent cold build  done=4 pending=0 ticks=23
+  PASS cold cache switched  C:\Users\Administrator\AppData\Local\Temp\rjitconc_-2101191479_477
+[jit] conc0 ok (async 284ms)
+[jit] conc1 ok (async 402ms)
+[jit] conc2 ok (async 455ms)
+[jit] conc3 ok (async 343ms)
+  PASS concurrent cold build  done=4 pending=0 ticks=22
 [jit] backend=msvc exe=C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/VC/Tools/MSVC/14.29.30133/bin/HostX64/x64/cl.exe arch=x64 origin=environment
   PASS cache restored  I:\Haxelib\hxcpp_jit_r\test\jitcache
 
@@ -355,8 +367,8 @@
   PASS bulk rejects non array
 
 == pointer handle ==
-  PASS ptr not null  JitPtr(0x000091F69A50)
-  PASS ptr readable  JitPtr(0x000091F69A50)
+  PASS ptr not null  JitPtr(0x0000A00A9A50)
+  PASS ptr readable  JitPtr(0x0000A00A9A50)
   PASS ptr read f64
   PASS ptr write f64
   PASS ptr write visible
@@ -373,14 +385,14 @@
 [jit] fastc ok (cached) [sq]
   PASS fast compile
   PASS fast matches call  -805274.-194 vs -805274.-194
-  PASS both paths measurably fast  call=0.026us  fast=0.027us
+  PASS both paths measurably fast  call=0.025us  fast=0.025us
 
 == file watch ==
 [jit] watched ok (cached)
   PASS watch registered
   PASS watched listed  watchme.cpp
   PASS watched initial
-[jit] watched ok (112ms)
+[jit] watched ok (110ms)
 [jit] reloaded watched
   PASS watched reloaded
   PASS unwatch
@@ -406,7 +418,7 @@
   PASS nested field write back
   PASS leaf fields listed  pos.x,pos.y,vel.x,vel.y,tag
   PASS bad path rejected
-[jit] sessarr ok (114ms)
+[jit] sessarr ok (144ms)
   PASS session struct array compiles
 [jit] sessarr ok (119ms)
   PASS session rebuild keeps struct array
@@ -463,7 +475,7 @@
 [jit] boom
 [jit] callAuto boom: native exception caught
   PASS cpp exception is trapped
-  PASS exception message reaches the log  hello boom
+  PASS exception message reaches the log  hello mapped boom
   PASS no exception path
   PASS two defaults filled
   PASS one default filled
@@ -538,7 +550,7 @@
   PASS linked unit exported
   PASS linked unit with include
   PASS multi file lists both  twice,quadplus,quad
-[jit] multi ok (118ms)
+[jit] multi ok (175ms)
   PASS multi file reload keeps units  ok=true
 [jit] multiglob ok (cached)
   PASS extra unit globals compile
@@ -620,13 +632,13 @@
 
 == throughput ==
 [jit] perf ok (cached) [mix]
-  PASS 500k calls  0.070us/call  acc=14000000
+  PASS 500k calls  0.028us/call  acc=14000000
 
 == stability ==
   PASS no broken modules  0 broken
 [jit] backend probe
   backend=msvc exe=C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/VC/Tools/MSVC/14.29.30133/bin/HostX64/x64/cl.exe arch=x64 origin=C:/Program Files (x86)/Microsoft Visual Studio/2019/Community
-  PASS setup ready  2ms
+  PASS setup ready  1ms
 
 == backend fallback ==
   PASS request clang  resolved backend=msvc
@@ -641,7 +653,7 @@
   PASS host log
   PASS fib(30)
   PASS undefined fn
-  PASS address  0x21000
+  PASS address  0x11000
   PASS symbols
 
 == diagnostics line accuracy ==
@@ -723,7 +735,7 @@
   PASS onError fired
 
 == pointer handle ==
-  PASS fn ptr not null  JitPtr(0x0000A0311030)
+  PASS fn ptr not null  JitPtr(0x0000AB7D1030)
   PASS ptr format
   PASS null ptr
 
@@ -779,7 +791,7 @@
 == pointer variables ==
   PASS pointer compile
   PASS kind ptr
-  PASS ptr reads as address  140722931994624
+  PASS ptr reads as address  140723113594880
   PASS addrOf value equals ptr
   PASS addrOf differs
   PASS read through ptr
@@ -827,12 +839,18 @@
   PASS manual add3
   PASS manual second module
   PASS manual tri
+  PASS manual unwind table  entries=331
+  PASS manual throw module
+  PASS manual throw uses the system loader
+  PASS manual throw trapped
+  PASS manual throw quiet path
+  PASS manual throw message  hello|mapped
   PASS manual unloaded  base=6442450944 images=0
   PASS loadlib still works
 
 == pack export / import ==
-  PASS export files  157 files
-  PASS pack manifest ok  pack ok: abi=9 codegen=27 platform=windows-x64 modules=95 bytes=9018368
+  PASS export files  688 files
+  PASS pack manifest ok  pack ok: abi=9 codegen=27 platform=windows-x64 modules=488 bytes=45763072
   PASS manifest exists
   PASS headline dll packed
 
@@ -840,7 +858,7 @@
   PASS cold compile
   PASS toolchain disabled  toolchain disabled by forceUnavailable
   PASS no cache yet fails  jit: error E_TOOLCHAIN toolchain disabled by forceUnavailable
-  PASS import files  8173 files
+  PASS import files  8619 files
   PASS cache-only hit  cached=true
   PASS cache-only call
   PASS toolchain restored
@@ -856,8 +874,8 @@
   PASS double dispose safe
 
 == concurrent cold build ==
-  PASS cold cache switched  C:\Users\Administrator\AppData\Local\Temp\rjitconc_-2102119945_295
-  PASS concurrent cold build  done=4 pending=0 ticks=23
+  PASS cold cache switched  C:\Users\Administrator\AppData\Local\Temp\rjitconc_-2101191479_477
+  PASS concurrent cold build  done=4 pending=0 ticks=22
   PASS cache restored  I:\Haxelib\hxcpp_jit_r\test\jitcache
 
 == bulk array io ==
@@ -877,8 +895,8 @@
   PASS bulk rejects non array
 
 == pointer handle ==
-  PASS ptr not null  JitPtr(0x000091F69A50)
-  PASS ptr readable  JitPtr(0x000091F69A50)
+  PASS ptr not null  JitPtr(0x0000A00A9A50)
+  PASS ptr readable  JitPtr(0x0000A00A9A50)
   PASS ptr read f64
   PASS ptr write f64
   PASS ptr write visible
@@ -893,7 +911,7 @@
 == fast call ==
   PASS fast compile
   PASS fast matches call  -805274.-194 vs -805274.-194
-  PASS both paths measurably fast  call=0.026us  fast=0.027us
+  PASS both paths measurably fast  call=0.025us  fast=0.025us
 
 == file watch ==
   PASS watch registered
@@ -971,7 +989,7 @@
 == exceptions, defaults and overloads ==
   PASS extras module compiles
   PASS cpp exception is trapped
-  PASS exception message reaches the log  hello boom
+  PASS exception message reaches the log  hello mapped boom
   PASS no exception path
   PASS two defaults filled
   PASS one default filled
@@ -1108,70 +1126,71 @@
   PASS concurrent calls agree
 
 == throughput ==
-  PASS 500k calls  0.070us/call  acc=14000000
+  PASS 500k calls  0.028us/call  acc=14000000
 
 == stability ==
   PASS no broken modules  0 broken
 
-[jit] RESULT PASS  (390 passed, 0 failed)
-[jit] ready=true builds=37 cacheHits=97 modules=57
+[jit] RESULT PASS  (396 passed, 0 failed)
+[jit] ready=true builds=37 cacheHits=100 modules=58
   backend=msvc exe=C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/VC/Tools/MSVC/14.29.30133/bin/HostX64/x64/cl.exe arch=x64 origin=environment
-  cache=I:\Haxelib\hxcpp_jit_r\test\jitcache size=29467KB
-  module=refs id=114 symbols=0 calls=5 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/0F8AD8252E907723/mod.dll
-  module=big id=71 symbols=200 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/2328F41706585655/mod.dll
-  module=agg id=76 symbols=0 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/044074F439A6FAC6/mod.dll
-  module=hotstress id=75 symbols=1 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/3EE407CC037CD836/mod3.dll
-  module=strs id=78 symbols=0 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/3163A32A392E7EB4/mod.dll
-  module=extras id=115 symbols=0 calls=8 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/20E5210519EF2D7B/mod.dll
-  module=cold id=95 symbols=0 calls=1 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcold_-2102123908_295/3172EC793F5EEC03/mod.dll
-  module=rjitcb_half_d_d_ id=131 symbols=0 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/2BFCF58B2C60C3B1/mod.dll
-  module=ptrs id=85 symbols=0 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/1F5CFDCB09E84599/mod.dll
-  module=cachedemo id=84 symbols=1 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/22ADF44004D6349E/mod.dll
-  module=cbtake id=130 symbols=0 calls=2 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/335E858B07433B91/mod.dll
-  module=fastc id=106 symbols=1 calls=4000000 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/3EDEE3B43E4D0D96/mod.dll
-  module=crash id=88 symbols=0 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/37212C9A3EE2498C/mod.dll
-  module=perf id=135 symbols=1 calls=500000 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/192DF1BC1628C692/mod.dll
-  module=threaded id=134 symbols=0 calls=400 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/176B73D7105D8631/mod.dll
-  module=strglob id=126 symbols=0 calls=1 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/1691EA951E415367/mod.dll
-  module=structarr id=109 symbols=0 calls=1 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/0575D2BF1B89A145/mod.dll
-  module=guard2 id=98 symbols=0 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/0FEC95123161BF7C/mod.dll
-  module=empty id=96 symbols=0 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/30F3559536FA2573/mod.dll
-  module=watched id=108 symbols=0 calls=3 dll=I:/Haxelib/hxcpp_jit_r/test/jitcache/2DF47CF10F1ABAC3/mod12.dll
-  module=sessarr id=111 symbols=0 calls=1 dll=I:/Haxelib/hxcpp_jit_r/test/jitcache/3CCC770A3AF936B8/mod12.dll
-  module=conc0 id=100 symbols=0 calls=0 dll=C:/Users/Administrator/AppData/Local/Temp/rjitconc_-2102119945_295/1707E3E83ED4E832/mod.dll
-  module=par0 id=91 symbols=1 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/3FBA28EC2D65D662/mod.dll
-  module=auto id=90 symbols=0 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/1D411AD035C270C6/mod.dll
-  module=par1 id=70 symbols=1 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/02C6EDA2353E4284/mod.dll
-  module=strs2 id=72 symbols=0 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/1D63C4D33AF08691/mod.dll
-  module=strret id=73 symbols=0 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/084506BF3AFD439D/mod.dll
-  module=conc1 id=101 symbols=0 calls=0 dll=C:/Users/Administrator/AppData/Local/Temp/rjitconc_-2102119945_295/048B053804034546/mod.dll
-  module=cbprobe id=129 symbols=0 calls=2 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/0498A00A28A9FF78/mod.dll
-  module=multiglob id=125 symbols=0 calls=1 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/3BCAD4F025D927AE/mod.dll
-  module=par2 id=74 symbols=1 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/32C3AE0936112BB7/mod.dll
-  module=conc2 id=102 symbols=0 calls=0 dll=C:/Users/Administrator/AppData/Local/Temp/rjitconc_-2102119945_295/26FA55163AFB735C/mod.dll
-  module=sweepkeep id=105 symbols=0 calls=1 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/0CF2CBE2362D7D84/mod.dll
-  module=par3 id=77 symbols=1 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/1794A552202BC85C/mod.dll
-  module=conc3 id=103 symbols=0 calls=0 dll=C:/Users/Administrator/AppData/Local/Temp/rjitconc_-2102119945_295/1CEDA30115B20693/mod.dll
-  module=bulk id=104 symbols=0 calls=1 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/33D63A350E82C7DF/mod.dll
-  module=ptrarr id=127 symbols=0 calls=1 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/02301AE40FD80B56/mod.dll
-  module=par4 id=79 symbols=1 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/09F63B31128959F3/mod.dll
-  module=arrmem id=128 symbols=0 calls=1 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/2B56EF1E2BB97A10/mod.dll
-  module=par5 id=81 symbols=1 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/1EF5F23C09F08926/mod.dll
-  module=over id=82 symbols=0 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/04EFF1C93CF6ABF3/mod.dll
-  module=par6 id=83 symbols=1 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/2FA766E3103785C9/mod.dll
-  module=par7 id=86 symbols=1 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/06A59F8D2AB4A92B/mod.dll
-  module=pairstr id=117 symbols=0 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/173DCD3C21AA41F2/mod.dll
-  module=par8 id=87 symbols=1 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/014F66800476A35E/mod.dll
-  module=exprm id=118 symbols=0 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/2895CDFD3C1B6843/mod.dll
-  module=multi id=124 symbols=0 calls=1 dll=I:/Haxelib/hxcpp_jit_r/test/jitcache/1EFA7E8E35CF6CF0/mod13.dll
-  module=overloads id=121 symbols=0 calls=3 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/030A48A407B4BFB2/mod.dll
-  module=members id=112 symbols=0 calls=4 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/16391D992011A3AF/mod.dll
-  module=byvalue id=113 symbols=0 calls=12 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/0C66297A2FC68B4C/mod.dll
-  module=exprbits id=120 symbols=0 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/26ABBB7230DFA210/mod.dll
-  module=rjitcb_plusone_i_i_ id=132 symbols=0 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/36EE4D4505C47FFB/mod.dll
-  module=exprfn id=119 symbols=0 calls=2 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/018E0F6438027FF2/mod.dll
-  module=eval_1E2E198C id=89 symbols=1 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/0BC399BC2872547A/mod.dll
-  module=bound id=122 symbols=0 calls=200002 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/32E722D4376DCCDE/mod.dll
-  module=core id=92 symbols=6 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/0426599C28E983BA/mod.dll
-  module=loadlib id=93 symbols=0 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/2498D65A373559AC/mod.dll
+  cache=I:\Haxelib\hxcpp_jit_r\test\jitcache size=34488KB
+  module=refs id=117 symbols=0 calls=5 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/0F8AD8252E907723/mod.dll
+  module=big id=73 symbols=200 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/2328F41706585655/mod.dll
+  module=agg id=78 symbols=0 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/044074F439A6FAC6/mod.dll
+  module=hotstress id=77 symbols=1 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/3EE407CC037CD836/mod18.dll
+  module=strs id=80 symbols=0 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/3163A32A392E7EB4/mod.dll
+  module=extras id=118 symbols=0 calls=8 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/20E5210519EF2D7B/mod.dll
+  module=cold id=98 symbols=0 calls=1 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcold_-2101195686_141/3172EC793F5EEC03/mod.dll
+  module=rjitcb_half_d_d_ id=134 symbols=0 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/2BFCF58B2C60C3B1/mod.dll
+  module=ptrs id=87 symbols=0 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/1F5CFDCB09E84599/mod.dll
+  module=cachedemo id=86 symbols=1 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/22ADF44004D6349E/mod.dll
+  module=cbtake id=133 symbols=0 calls=2 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/335E858B07433B91/mod.dll
+  module=fastc id=109 symbols=1 calls=4000000 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/3EDEE3B43E4D0D96/mod.dll
+  module=crash id=90 symbols=0 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/37212C9A3EE2498C/mod.dll
+  module=perf id=138 symbols=1 calls=500000 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/192DF1BC1628C692/mod.dll
+  module=threaded id=137 symbols=0 calls=400 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/176B73D7105D8631/mod.dll
+  module=strglob id=129 symbols=0 calls=1 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/1691EA951E415367/mod.dll
+  module=structarr id=112 symbols=0 calls=1 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/0575D2BF1B89A145/mod.dll
+  module=manthrow id=91 symbols=0 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/1EF58D620A3F99F4/mod.dll
+  module=guard2 id=101 symbols=0 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/0FEC95123161BF7C/mod.dll
+  module=empty id=99 symbols=0 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/30F3559536FA2573/mod.dll
+  module=watched id=111 symbols=0 calls=3 dll=I:/Haxelib/hxcpp_jit_r/test/jitcache/2DF47CF10F1ABAC3/mod24.dll
+  module=sessarr id=114 symbols=0 calls=1 dll=I:/Haxelib/hxcpp_jit_r/test/jitcache/3CCC770A3AF936B8/mod24.dll
+  module=conc0 id=103 symbols=0 calls=0 dll=C:/Users/Administrator/AppData/Local/Temp/rjitconc_-2101191479_477/233D38623758B644/mod.dll
+  module=par0 id=94 symbols=1 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/0F237A171D1EB87D/mod.dll
+  module=auto id=93 symbols=0 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/1D411AD035C270C6/mod.dll
+  module=par1 id=72 symbols=1 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/27C6823423DF1826/mod.dll
+  module=strs2 id=74 symbols=0 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/1D63C4D33AF08691/mod.dll
+  module=strret id=75 symbols=0 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/084506BF3AFD439D/mod.dll
+  module=conc1 id=104 symbols=0 calls=0 dll=C:/Users/Administrator/AppData/Local/Temp/rjitconc_-2101191479_477/34B6A9193037C287/mod.dll
+  module=cbprobe id=132 symbols=0 calls=2 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/0498A00A28A9FF78/mod.dll
+  module=multiglob id=128 symbols=0 calls=1 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/3BCAD4F025D927AE/mod.dll
+  module=sweepkeep id=108 symbols=0 calls=1 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/0CF2CBE2362D7D84/mod.dll
+  module=par2 id=76 symbols=1 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/32FED2A33EA728B1/mod.dll
+  module=conc2 id=105 symbols=0 calls=0 dll=C:/Users/Administrator/AppData/Local/Temp/rjitconc_-2101191479_477/0D1C3B4128D356A3/mod.dll
+  module=par3 id=79 symbols=1 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/3752A7A60DA3EB94/mod.dll
+  module=conc3 id=106 symbols=0 calls=0 dll=C:/Users/Administrator/AppData/Local/Temp/rjitconc_-2101191479_477/093D84A01EA757E2/mod.dll
+  module=bulk id=107 symbols=0 calls=1 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/33D63A350E82C7DF/mod.dll
+  module=ptrarr id=130 symbols=0 calls=1 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/02301AE40FD80B56/mod.dll
+  module=par4 id=81 symbols=1 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/14020715357D20CB/mod.dll
+  module=arrmem id=131 symbols=0 calls=1 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/2B56EF1E2BB97A10/mod.dll
+  module=par5 id=83 symbols=1 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/2E6151881DC02332/mod.dll
+  module=over id=84 symbols=0 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/04EFF1C93CF6ABF3/mod.dll
+  module=par6 id=85 symbols=1 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/1C2C8B820E6F14D0/mod.dll
+  module=par7 id=88 symbols=1 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/1AB412890CF125B7/mod.dll
+  module=pairstr id=120 symbols=0 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/173DCD3C21AA41F2/mod.dll
+  module=par8 id=89 symbols=1 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/10C1125335CA150D/mod.dll
+  module=exprm id=121 symbols=0 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/2895CDFD3C1B6843/mod.dll
+  module=multi id=127 symbols=0 calls=1 dll=I:/Haxelib/hxcpp_jit_r/test/jitcache/1EFA7E8E35CF6CF0/mod25.dll
+  module=overloads id=124 symbols=0 calls=3 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/030A48A407B4BFB2/mod.dll
+  module=members id=115 symbols=0 calls=4 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/16391D992011A3AF/mod.dll
+  module=byvalue id=116 symbols=0 calls=12 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/0C66297A2FC68B4C/mod.dll
+  module=exprbits id=123 symbols=0 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/26ABBB7230DFA210/mod.dll
+  module=rjitcb_plusone_i_i_ id=135 symbols=0 calls=0 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/36EE4D4505C47FFB/mod.dll
+  module=exprfn id=122 symbols=0 calls=2 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/018E0F6438027FF2/mod.dll
+  module=eval_1E2E198C id=92 symbols=1 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/0BC399BC2872547A/mod.dll
+  module=bound id=125 symbols=0 calls=200002 dll=I:\Haxelib\hxcpp_jit_r\test\jitcache/32E722D4376DCCDE/mod.dll
+  module=core id=95 symbols=6 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/0426599C28E983BA/mod.dll
+  module=loadlib id=96 symbols=0 calls=0 dll=C:\Users\Administrator\AppData\Local\Temp\rjitcache/2498D65A373559AC/mod.dll
 
