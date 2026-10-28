@@ -155,6 +155,8 @@ m.callAuto("bump", []);
 m.getVar("counter");        // 1
 ```
 
+Scanning is line based: an export or a global starts in column 0 and keeps its whole signature, the default arguments and the opening brace on that one line. Anything indented belongs to a body and is left alone.
+
 The standard library, inline assembly, SIMD intrinsics and templates all work. The default is `/MT`, so the library carries its own C runtime.
 
 ---
@@ -705,7 +707,7 @@ A manually mapped module is not in the system module list; `GetModuleHandle` can
 
 The same option on Linux maps the ELF image instead of calling `dlopen`: program headers are copied, relocations are applied from the dynamic section, and `DT_INIT`, `DT_INIT_ARRAY`, `DT_FINI` and `DT_FINI_ARRAY` run in order.
 
-Thread-local storage is served by a resolver the loader installs for `__tls_get_addr`: each thread gets its own copy of the `PT_TLS` template, allocated on first use. Images compiled with `-ftls-model=initial-exec` or `local-exec` address TLS through the thread pointer instead and are refused with a message; `loader: "auto"` falls back to the system loader for them.
+Thread-local storage is served by a resolver the loader installs for `__tls_get_addr`: each thread gets its own copy of the `PT_TLS` template, allocated on first use. The template is copied when the image registers, so the image buffer may be released afterwards. A slot is returned when the image unloads and reused under a new generation, so a reload never reads the previous module's block. Thirty-two images can hold TLS at the same time. Images compiled with `-ftls-model=initial-exec` or `local-exec` address TLS through the thread pointer instead and are refused with a message; `loader: "auto"` falls back to the system loader for them.
 
 ### Distributing a build cache
 
@@ -834,13 +836,14 @@ Time goes into compiler process startup and linking, not into the amount of code
 - Reference parameters cover scalars, structs and `std::string`; a mutable `std::string&` writes back through `callStr` or `callStrBoth`, and other reference types need a wrapper
 - Changing the ABI header layout requires clearing the host precompiled header and rebuilding
 - A callback fired from a native thread is queued and runs on the thread that calls `Jit.tick()`; the native thread waits for it, for at most `Jit.threadTimeout` milliseconds, and then receives zero
+- `RJIT(abi)`, `RJIT(init)` and `RJIT(deinit)` collide with the module entry points the loader emits; name module functions something else
 - The build lock is per process; two processes building the same key at the same time still race on object files
 
 ---
 
 ## Testing
 
-`test/` is a standalone console project with 414 assertions.
+`test/` is a standalone console project with 424 assertions.
 
 `example/` is a two file project that compiles a module and calls it:
 

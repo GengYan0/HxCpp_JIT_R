@@ -4,9 +4,9 @@
   "license": "MIT",
   "tags": ["cpp", "jit", "native", "windows", "msvc", "runtime", "hot-reload"],
   "description": "Compile and call native C++ from a hxcpp application at runtime.",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "classPath": "src",
-  "releasenote": "beta: callbacks from a native thread are delivered on the ticking thread",
+  "releasenote": "beta: thread-local templates survive an unload and the cache replaces stale artifacts",
   "contributors": ["GengYan0"],
   "dependencies": {}
 }
