@@ -1,7 +1,7 @@
 package hxcpp_jit_r;
 
 class JitAbi {
-  public static inline var VERSION:Int = 9;
+  public static inline var VERSION:Int = 13;
 
   public static var HEADER:String = '#ifndef RJIT_ABI_H
 #define RJIT_ABI_H
@@ -9,7 +9,7 @@ class JitAbi {
 #include <string.h>
 #include <stdlib.h>
 
-#define RJIT_ABI_VERSION 9
+#define RJIT_ABI_VERSION 13
 
 #ifdef __cplusplus
 #include <limits>
@@ -92,7 +92,7 @@ typedef double (*RJitFn)(RJitCtx*, RJitArgs*);
 #define RJIT_GET(k) (ctx->h->get(ctx->m, (k), (int)strlen(k)))
 
 #ifdef RJIT_DEFINE_ABI_EXPORT
-extern "C" RJIT_API double rjit_abi(void) { return (double)RJIT_ABI_VERSION; }
+extern "C" RJIT_API inline double rjit_abi(void) { return (double)RJIT_ABI_VERSION; }
 #endif
 
 #endif

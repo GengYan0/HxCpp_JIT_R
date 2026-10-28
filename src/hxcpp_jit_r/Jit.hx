@@ -300,11 +300,10 @@ class Jit {
     var body = ret == "void"
       ? "(void)f((void*)0, \"" + name + "\", (int)strlen(\"" + name + "\"), " + vs.join(", ") + ");"
       : "return (" + ret + ")f((void*)0, \"" + name + "\", (int)strlen(\"" + name + "\"), " + vs.join(", ") + ");";
-    var src = '#include <windows.h>\n'
-      + "typedef double (*RJitHC)(void*, const char*, int, double, double, double, double);\n"
+    var src = "typedef double (*RJitHC)(void*, const char*, int, double, double, double, double);\n"
       + "static RJitHC rjit_hc = 0;\n"
+      + 'extern "C" RJIT_API void rjit_cb_bind(void* f) { rjit_hc = (RJitHC)f; }\n'
       + 'extern "C" RJIT_API ' + ret + " rjit_cb(" + ps.join(", ") + ") {\n"
-      + "  if (!rjit_hc) rjit_hc = (RJitHC)GetProcAddress(GetModuleHandleA(0), \"rjit_host_call\");\n"
       + "  RJitHC f = rjit_hc;\n"
       + "  if (!f) return (" + ret + ")0;\n"
       + "  " + body + "\n}\n";
@@ -313,6 +312,8 @@ class Jit {
       log("[jit] callback compile failed: " + (m.diag.length > 0 ? JitCompiler.describe(m.diag[0]) : "no diag"));
       return 0;
     }
+    var bind = m.resolve("rjit_cb_bind");
+    if (bind != 0) JitNative.invoke(bind, JitNative.hostCall(), 0, 0, 0, 0, 0, 0, 0);
     var a = JitNative.toFloat(m.resolve("rjit_cb"));
     if (a != 0) cbCache.set(key, a);
     return a;

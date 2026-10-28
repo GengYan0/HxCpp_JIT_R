@@ -816,7 +816,7 @@ double pick1(double a, double b) { return a * b; }
     sys.io.File.saveContent(mdir + "/main.cpp", "#include \"shared.h\"\ndouble quad(double v) { return sq(v) * 2; }\n");
     sys.io.File.saveContent(mdir + "/extra.cpp", "#include \"shared.h\"\ndouble twice(double v) { return v * 2; }\ndouble quadplus(double v) { return sq(v) * 2 + 1; }\n");
     var mm = Jit.compileFiles("multi", mdir + "/main.cpp", [mdir + "/extra.cpp"], {includes: [mdir]});
-    ok("multi file compiles", mm.ok, mm.diag.length > 0 ? JitCompiler.describe(mm.diag[0]) : "");
+    ok("multi file compiles", mm.ok, mm.diag.length > 0 ? JitCompiler.describe(mm.diag[0]) + " | " + mm.log : mm.log);
     eq("main unit with local include", Std.string(mm.callAuto("quad", [3])), "18");
     eq("linked unit exported", Std.string(mm.callAuto("twice", [4])), "8");
     eq("linked unit with include", Std.string(mm.callAuto("quadplus", [3])), "19");
@@ -834,7 +834,7 @@ P anchor = {7,8};
 double alive() { return counter + hits[1]; }
 ");
     var mg = Jit.compileFiles("multiglob", mdir + "/gmain.cpp", [mdir + "/gextra.cpp"]);
-    ok("extra unit globals compile", mg.ok, mg.diag.length > 0 ? JitCompiler.describe(mg.diag[0]) : "");
+    ok("extra unit globals compile", mg.ok, mg.diag.length > 0 ? JitCompiler.describe(mg.diag[0]) + " | " + mg.log : mg.log);
     eq("extra scalar read", Std.string(mg.get("counter")), "5");
     ok("extra scalar write", mg.set("counter", 9), "");
     eq("extra scalar seen natively", Std.string(mg.callAuto("alive", [])), "11");

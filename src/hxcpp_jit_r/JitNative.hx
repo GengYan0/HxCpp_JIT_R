@@ -572,6 +572,9 @@ class JitNative {
   @:functionCode('return (size_t)((void*(*)())(size_t)f)();')
   public static function callPtr0(f:cpp.SizeT):cpp.SizeT return 0;
 
+  @:functionCode('return rjit_host_table ? (size_t)rjit_host_table->call : 0;')
+  public static function hostCall():cpp.SizeT return 0;
+
   @:functionCode('return (size_t)&rjit_tls_get;')
   public static function tlsAddr():cpp.SizeT return 0;
 
