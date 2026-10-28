@@ -7,6 +7,7 @@ import hxcpp_jit_r.JitElf;
 import hxcpp_jit_r.JitPtr;
 import hxcpp_jit_r.JitLoader;
 import hxcpp_jit_r.JitPlatform;
+import hxcpp_jit_r.JitScan;
 #if cpp
 import sys.thread.Thread;
 #end
@@ -188,6 +189,15 @@ RJIT(d) { return 4; }
     var c2 = Jit.compile("cachedemo", src);
     ok("second is cached", c2.cached);
     eq("cached value", Std.string(c2.call("v")), "1234");
+
+    var hdrDir = tmpRoot() + "/rjithdr";
+    rmTree(hdrDir);
+    var hc1 = new hxcpp_jit_r.JitCache(hdrDir);
+    ok("header written", hc1.prepare(), "");
+    sys.io.File.saveContent(hc1.headerFile(), "#define RJIT_ABI_VERSION 1\n");
+    var hc2 = new hxcpp_jit_r.JitCache(hdrDir);
+    ok("stale header replaced", hc2.prepare(), "");
+    eq("header content restored", sys.io.File.getContent(hc2.headerFile()) == hxcpp_jit_r.JitAbi.HEADER ? "yes" : "no", "yes");
 
     head("auto signature");
     var sc = hxcpp_jit_r.JitScan.functions("double half(double x) { return x / 2; }\nint c2 = 5;\n");
@@ -906,6 +916,20 @@ double alive() { return counter + hits[1]; }
     eq("relr bitmap slot", Std.string(Std.int(tg[1])), "4104");
     eq("relr resumes", Std.string(Std.int(tg[2])), "8192");
 
+    head("signature mapping");
+    var sfns = JitScan.functions("int fill(char** out) { return 0; }\nlong big(unsigned long v) { return v; }\nint blen(const unsigned char* p, int n) { return n; }\nint cstrlen(const char* s) { return 0; }\n");
+    var sigOf = function(n:String):String {
+      for (f in sfns) if (f.name == n) return f.sig;
+      return "";
+    };
+    eq("char** is a pointer", sigOf("fill"), "i(p)");
+    eq("unsigned long is wide", sigOf("big"), "l(l)");
+    eq("unsigned char* is a pointer", sigOf("blen"), "i(pi)");
+    eq("const char* stays a string", sigOf("cstrlen"), "i(s)");
+    var sgv = JitScan.globals("std::string names[4];\nint plain;\n");
+    eq("array of std::string is skipped", Std.string(sgv.length), "1");
+    eq("plain global survives", sgv[0].name, "plain");
+
     head("thread local blocks");
     var seed = haxe.io.Bytes.alloc(8);
     seed.setInt32(0, 0x11223344);
@@ -919,6 +943,47 @@ double alive() { return counter + hits[1]; }
     eq("tls zero filled", Std.string(Std.int(JitNative.peek(JitNative.toSizeT(JitNative.toFloat(tblock) + 8), 4))), "0");
     ok("tls resolver address", JitNative.tlsAddr() != 0, "");
     eq("tls block is per thread copy", Std.string(JitNative.tlsBlock(tid) == tblock), "true");
+
+    var seed2 = haxe.io.Bytes.alloc(8);
+    seed2.setInt32(0, 0x0A0B0C0D);
+    seed2.setInt32(4, 0x01020304);
+    var tid2 = JitNative.tlsRegister(16, JitLoader.ptrOf(seed2), 8);
+    seed2.fill(0, 8, 0x5A);
+    var observed = 0;
+    var lk = new sys.thread.Lock();
+    sys.thread.Thread.create(function() {
+      var b = JitNative.tlsBlock(tid2);
+      observed = b == 0 ? 0 : Std.int(JitNative.peek(b, 4));
+      lk.release();
+    });
+    lk.wait();
+    eq("tls init owned by the registry", Std.string(observed), Std.string(0x0A0B0C0D));
+
+    var reuseOk = true;
+    for (i in 0...40) {
+      var rb2 = haxe.io.Bytes.alloc(4);
+      rb2.setInt32(0, i + 1);
+      var rid = JitNative.tlsRegister(8, JitLoader.ptrOf(rb2), 4);
+      if (rid <= 0) {
+        reuseOk = false;
+        break;
+      }
+      JitNative.tlsUnregister(rid);
+    }
+    ok("tls slots are reusable", reuseOk, "");
+
+    var ba = haxe.io.Bytes.alloc(4);
+    ba.setInt32(0, 0x1111);
+    var idA = JitNative.tlsRegister(32, JitLoader.ptrOf(ba), 4);
+    var blkA = JitNative.tlsBlock(idA);
+    eq("tls slot a init", Std.string(Std.int(JitNative.peek(blkA, 4))), "4369");
+    JitNative.tlsUnregister(idA);
+    var bb = haxe.io.Bytes.alloc(4);
+    bb.setInt32(0, 0x2222);
+    var idB = JitNative.tlsRegister(64, JitLoader.ptrOf(bb), 4);
+    var blkB = JitNative.tlsBlock(idB);
+    eq("tls reused slot reloads init", Std.string(Std.int(JitNative.peek(blkB, 4))), "8738");
+    JitNative.tlsUnregister(idB);
 
     head("string globals");
     var sg = Jit.compile("strglob", '
