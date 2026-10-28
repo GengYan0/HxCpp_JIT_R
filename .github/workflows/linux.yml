@@ -24,6 +24,7 @@ jobs:
           tar xzf haxe.tar.gz -C "$HOME/haxe" --strip-components=1
           tar xzf neko.tar.gz -C "$HOME/neko" --strip-components=1
           echo "$HOME/haxe" >> "$GITHUB_PATH"
+          echo "$HOME/neko" >> "$GITHUB_PATH"
           echo "NEKOPATH=$HOME/neko" >> "$GITHUB_ENV"
           echo "LD_LIBRARY_PATH=$HOME/neko" >> "$GITHUB_ENV"
 
