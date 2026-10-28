@@ -65,6 +65,13 @@ class Jit {
   static var defaultLoader:String = "loadlib";
   static var watched:Array<{path:String, name:String, sig:String, cb:Null<JitModule->Void>}> = [];
   public static var watchEvery:Int = 30;
+  public static var threadTimeout(default, set):Int = 2000;
+
+  static function set_threadTimeout(v:Int):Int {
+    threadTimeout = v < 1 ? 1 : v;
+    JitNative.setWait(threadTimeout);
+    return threadTimeout;
+  }
   static var watchTick:Int = 0;
   static var inited:Bool = false;
   static var hooked:Bool = false;
@@ -81,6 +88,7 @@ class Jit {
     inited = true;
     cache = new JitCache(cacheDir);
     cache.prepare();
+    JitNative.setHostThread();
     tool = JitToolchain.detect(o != null && o.backend != null ? o.backend : "auto");
     compiler = new JitCompiler(tool, cache);
     if (o != null) {
@@ -472,6 +480,7 @@ class Jit {
   }
 
   public static function tick():Void {
+    JitNative.pump();
     frame++;
     tickSweep();
     if (watched.length > 0) {

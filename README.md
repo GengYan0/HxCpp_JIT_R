@@ -1,6 +1,6 @@
 # HxCpp_JIT_R
 
-0.1.15
+0.1.16
 
 Compile and call native C++ while your application is running. Hand it a source string, get a module back, call its functions like any Haxe method.
 
@@ -22,6 +22,7 @@ Behind the call the source goes into a cache directory, is compiled into a share
 - Pointer, `const char*` and `std::string` members of structs, and `std::string` / `const char*` globals, read with `str()` and written with `setStr()`
 - Struct, scalar and string reference parameters, struct results by value read through a handle, and exceptions trapped at the boundary
 - Function pointer arguments: `Jit.callback(name, shape)` compiles a stub that forwards to a callback registered with `Jit.bind`, numeric or text
+- A callback fired from a native thread is handed to the thread that runs `Jit.tick()`, so Haxe code never runs on an unregistered thread
 - `const char*` results read straight back by `callStr`
 - Zero-compile reads and writes for globals, struct fields, array elements and array members (`g.row[2]`, `gs[1].row[2]`)
 - Handles resolved once at load, so the call path never reaches the symbol table
@@ -177,7 +178,7 @@ The standard library, inline assembly, SIMD intrinsics and templates all work. T
 | `Jit.exportPack(dir):Int` / `Jit.importPack(dir):Int` | Package and restore the cache |
 | `Jit.packInfo(dir):String` | Validate a package |
 | `Jit.get(name)` / `Jit.all()` / `Jit.dispose(name)` | Module management |
-| `Jit.tick()` | Per-frame driver: async results, deferred unload, file polling |
+| `Jit.tick()` | Per-frame driver: callbacks from other threads, async results, deferred unload, file polling |
 | `Jit.clean(?keep)` / `Jit.sweep(?keep)` | Drop old binaries and temporaries, or whole unused module directories |
 | `Jit.hook()` | Attach `tick` to the host frame event |
 | `Jit.bind(name, fn)` / `Jit.unbind(name)` | Register host callbacks |
@@ -832,14 +833,14 @@ Time goes into compiler process startup and linking, not into the amount of code
 - ELF manual mapping serves thread-local storage through a general-dynamic resolver it installs itself; an image that addresses TLS through the thread pointer instead is handed to the system loader, even with `loader: "manual"`
 - Reference parameters cover scalars, structs and `std::string`; a mutable `std::string&` writes back through `callStr` or `callStrBoth`, and other reference types need a wrapper
 - Changing the ABI header layout requires clearing the host precompiled header and rebuilding
-- A callback that fires on a native thread runs on that thread; it may not touch Haxe objects that belong to another thread
+- A callback fired from a native thread is queued and runs on the thread that calls `Jit.tick()`; the native thread waits for it, for at most `Jit.threadTimeout` milliseconds, and then receives zero
 - The build lock is per process; two processes building the same key at the same time still race on object files
 
 ---
 
 ## Testing
 
-`test/` is a standalone console project with 407 assertions.
+`test/` is a standalone console project with 414 assertions.
 
 `example/` is a two file project that compiles a module and calls it:
 

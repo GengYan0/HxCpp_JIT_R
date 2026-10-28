@@ -145,15 +145,166 @@ extern "C" void* rjit_tls_get(void* idx) {
 #define RJIT_HOST_EXPORT __attribute__((visibility("default")))
 #endif
 
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <atomic>
+#include <chrono>
+
+#define RJIT_JOB_MAX 16
+
+struct RJitJob {
+  bool active;
+  bool taken;
+  bool done;
+  bool isStr;
+  void* m;
+  char name[128];
+  int len;
+  double a0, a1, a2, a3;
+  double result;
+  char* text;
+  int textLen;
+};
+
+static RJitJob rjit_jobs[RJIT_JOB_MAX];
+static std::mutex rjit_job_mu;
+static std::condition_variable rjit_job_ready;
+static std::condition_variable rjit_job_done;
+static std::thread::id rjit_host_tid;
+static std::atomic<bool> rjit_host_set(false);
+static int rjit_wait_ms = 2000;
+
+extern "C" RJIT_HOST_EXPORT void rjit_set_host_thread(void) {
+  rjit_host_tid = std::this_thread::get_id();
+  rjit_host_set.store(true);
+}
+
+extern "C" RJIT_HOST_EXPORT void rjit_set_wait(int ms) {
+  rjit_wait_ms = ms < 1 ? 1 : ms;
+}
+
+static bool rjit_on_host(void) {
+  return rjit_host_set.load() && std::this_thread::get_id() == rjit_host_tid;
+}
+
+static double rjit_queue(void* m, const char* n, int len, double a0, double a1, double a2, double a3, bool isStr, char** outText, int* outLen) {
+  std::unique_lock<std::mutex> lk(rjit_job_mu);
+  int idx = -1;
+  for (int i = 0; i < RJIT_JOB_MAX; i++) {
+    if (!rjit_jobs[i].active) {
+      idx = i;
+      break;
+    }
+  }
+  if (idx < 0) return 0.0;
+  RJitJob& j = rjit_jobs[idx];
+  j.active = true;
+  j.taken = false;
+  j.done = false;
+  j.isStr = isStr;
+  j.m = m;
+  j.result = 0.0;
+  j.text = 0;
+  j.textLen = 0;
+  j.len = len > 127 ? 127 : len;
+  if (j.len > 0) memcpy(j.name, n, (size_t)j.len);
+  j.name[j.len] = 0;
+  j.a0 = a0;
+  j.a1 = a1;
+  j.a2 = a2;
+  j.a3 = a3;
+  rjit_job_ready.notify_one();
+  bool ok = rjit_job_done.wait_for(lk, std::chrono::milliseconds(rjit_wait_ms), [&] { return j.done; });
+  double r = 0.0;
+  if (ok) {
+    r = j.result;
+    if (isStr && outText != 0 && j.text != 0) {
+      *outText = j.text;
+      *outLen = j.textLen;
+      j.text = 0;
+    }
+  }
+  if (j.text != 0) {
+    free(j.text);
+    j.text = 0;
+  }
+  j.active = false;
+  lk.unlock();
+  rjit_job_done.notify_all();
+  return r;
+}
+
+extern "C" RJIT_HOST_EXPORT void rjit_pump(void) {
+  rjit_host_tid = std::this_thread::get_id();
+  rjit_host_set.store(true);
+  if (rjit_host_table == 0) return;
+  for (int round = 0; round < 8; round++) {
+    int idx = -1;
+    {
+      std::lock_guard<std::mutex> lk(rjit_job_mu);
+      for (int i = 0; i < RJIT_JOB_MAX; i++) {
+        if (rjit_jobs[i].active && !rjit_jobs[i].taken) {
+          idx = i;
+          rjit_jobs[i].taken = true;
+          break;
+        }
+      }
+    }
+    if (idx < 0) return;
+    RJitJob& j = rjit_jobs[idx];
+    double r = 0.0;
+    char* text = 0;
+    int textLen = 0;
+    if (j.isStr) {
+      ::String s = ::hxcpp_jit_r::JitNative_obj::onCallStr((int)(size_t)j.m, ::String::create(j.name, j.len), j.a0, j.a1, j.a2, j.a3);
+      const char* u = s.utf8_str();
+      size_t ul = u == 0 ? 0 : strlen(u);
+      textLen = (int)ul;
+      text = (char*)malloc(ul + 1);
+      if (text != 0) {
+        if (ul > 0) memcpy(text, u, ul);
+        text[ul] = 0;
+      }
+    } else {
+      r = ::hxcpp_jit_r::JitNative_obj::onCall((int)(size_t)j.m, ::String::create(j.name, j.len), j.a0, j.a1, j.a2, j.a3);
+    }
+    {
+      std::lock_guard<std::mutex> lk(rjit_job_mu);
+      if (j.active) {
+        j.result = r;
+        j.text = text;
+        j.textLen = textLen;
+        j.done = true;
+        text = 0;
+      }
+    }
+    if (text != 0) free(text);
+    rjit_job_done.notify_all();
+  }
+}
+
 extern "C" RJIT_HOST_EXPORT double rjit_host_call(void* m, const char* n, int len, double a0, double a1, double a2, double a3) {
-  return rjit_host_table ? rjit_host_table->call(m, n, len, a0, a1, a2, a3) : 0.0;
+  if (rjit_host_table == 0) return 0.0;
+  if (rjit_on_host()) return rjit_host_table->call(m, n, len, a0, a1, a2, a3);
+  return rjit_queue(m, n, len, a0, a1, a2, a3, false, 0, 0);
 }
 
 extern "C" RJIT_HOST_EXPORT const char* rjit_host_str(void* m, const char* n, int len, double a0, double a1, double a2, double a3) {
   static thread_local ::String held;
-  held = rjit_host_table
-    ? ::hxcpp_jit_r::JitNative_obj::onCallStr((int)(size_t)m, ::String::create(n, len), a0, a1, a2, a3)
-    : ::String("");
+  if (rjit_host_table == 0) {
+    held = ::String("");
+    return held.utf8_str();
+  }
+  if (rjit_on_host()) {
+    held = ::hxcpp_jit_r::JitNative_obj::onCallStr((int)(size_t)m, ::String::create(n, len), a0, a1, a2, a3);
+    return held.utf8_str();
+  }
+  char* text = 0;
+  int textLen = 0;
+  rjit_queue(m, n, len, a0, a1, a2, a3, true, &text, &textLen);
+  held = text != 0 ? ::String::create(text, textLen) : ::String("");
+  if (text != 0) free(text);
   return held.utf8_str();
 }
 
@@ -621,7 +772,7 @@ class JitNative {
   @:functionCode('return (size_t)((void*(*)())(size_t)f)();')
   public static function callPtr0(f:cpp.SizeT):cpp.SizeT return 0;
 
-  @:functionCode('return rjit_host_table ? (size_t)rjit_host_table->call : 0;')
+  @:functionCode('return rjit_host_table ? (size_t)&rjit_host_call : 0;')
   public static function hostCall():cpp.SizeT return 0;
 
   @:functionCode('return (size_t)&rjit_host_str;')
@@ -629,6 +780,15 @@ class JitNative {
 
   @:functionCode('((void(*)(void*,void*))(size_t)fn)((void*)(size_t)a, (void*)(size_t)b); return 0.0;')
   public static function callVoid2(fn:cpp.SizeT, a:cpp.SizeT, b:cpp.SizeT):Float return 0;
+
+  @:functionCode('rjit_set_host_thread(); return 0.0;')
+  public static function setHostThread():Float return 0;
+
+  @:functionCode('rjit_set_wait(ms); return 0.0;')
+  public static function setWait(ms:Int):Float return 0;
+
+  @:functionCode('rjit_pump(); return 0.0;')
+  public static function pump():Float return 0;
 
   @:functionCode('return (size_t)&rjit_tls_get;')
   public static function tlsAddr():cpp.SizeT return 0;

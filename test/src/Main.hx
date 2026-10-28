@@ -1034,6 +1034,47 @@ double apply2(int (*f)(int), double v) { return (double)f((int)v); }
     eq("no half written sources left", Std.string(countSuffix(Jit.cache.root, ".w")), "0");
     eq("no pch leftovers", Std.string(countSuffix(Jit.cache.root + "/pch", ".tmp")), "0");
 
+    head("callback from a native thread");
+    var seen = 0;
+    Jit.bind("bump", function(a:Float, b:Float, c:Float, d:Float):Float {
+      seen++;
+      return a * 2;
+    });
+    var ntm = Jit.compile("nthread", '#include <thread>
+static std::thread w;
+static double total = 0;
+static void body(double (*cb)(double)) { for (int i = 1; i <= 3; i++) total += cb((double)i); }
+void spawn(double (*cb)(double)) { w = std::thread(body, cb); }
+double collect() { if (w.joinable()) w.join(); return total; }
+');
+    ok("native thread module", ntm.ok, ntm.diag.length > 0 ? JitCompiler.describe(ntm.diag[0]) : "");
+    var ncb = Jit.callback("bump", "d(d)");
+    ntm.callAuto("spawn", [ncb]);
+    var spin = 0;
+    while (seen < 3 && spin < 400) {
+      Jit.tick();
+      Sys.sleep(0.005);
+      spin++;
+    }
+    eq("callback delivered on the host thread", Std.string(seen), "3");
+    eq("native side got the results", Std.string(ntm.callAuto("collect", [])), "12");
+
+    Jit.threadTimeout = 40;
+    var tj = Jit.compile("nthread2", '#include <thread>
+static double got = 0;
+void fireJoined(double (*cb)(double)) { std::thread t([cb]{ got = cb(9.0); }); t.join(); }
+double read() { return got; }
+');
+    ok("joined thread module", tj.ok, tj.diag.length > 0 ? JitCompiler.describe(tj.diag[0]) : "");
+    var before = seen;
+    var t0 = Sys.time();
+    tj.callAuto("fireJoined", [ncb]);
+    var waited = (Sys.time() - t0) * 1000.0;
+    ok("a host that does not pump lets the call time out", waited >= 20 && waited < 1500, Jit.f3(waited) + "ms");
+    eq("the timed out callback returned zero", Std.string(tj.callAuto("read", [])), "0");
+    eq("the timed out callback never ran", Std.string(seen), Std.string(before));
+    Jit.threadTimeout = 2000;
+
     head("throughput");
     var pm = Jit.compile("perf", "RJIT(mix) { double s = 0; for (int i = 0; i < 8; i++) s += (double)i * RJIT_A0; return s; }\n");
     var reps = 500000;
