@@ -839,7 +839,7 @@ Time goes into compiler process startup and linking, not into the amount of code
 
 ## Testing
 
-`test/` is a standalone console project with 406 assertions.
+`test/` is a standalone console project with 407 assertions.
 
 `example/` is a two file project that compiles a module and calls it:
 

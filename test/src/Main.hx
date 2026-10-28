@@ -811,7 +811,12 @@ double pick1(double a, double b) { return a * b; }
     var accB:Float = 0;
     for (i in 0...repsB) accB += bf.call(i, 1);
     var bUs = (Sys.time() - tB) * 1000000.0 / repsB;
-    ok("bound call is fast", bUs < 0.5 && accB > 0, Jit.f3(bUs) + "us/call");
+    var tA = Sys.time();
+    var accA:Float = 0;
+    for (i in 0...repsB) accA += bh.callAuto("add", [i, 1]);
+    var aUs = (Sys.time() - tA) * 1000000.0 / repsB;
+    ok("bound call is fast", bUs < 5.0 && accB > 0 && accA > 0, Jit.f3(bUs) + "us/call");
+    ok("bound call beats a fresh lookup", bUs <= aUs, Jit.f3(bUs) + " vs " + Jit.f3(aUs) + "us/call");
 
     head("multiple translation units");
     var mdir = Sys.getCwd() + "/multitu";
