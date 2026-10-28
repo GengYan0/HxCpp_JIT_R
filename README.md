@@ -1,6 +1,6 @@
 # HxCpp_JIT_R
 
-0.1.14
+0.1.15
 
 Compile and call native C++ while your application is running. Hand it a source string, get a module back, call its functions like any Haxe method.
 
@@ -33,7 +33,7 @@ Behind the call the source goes into a cache directory, is compiled into a share
 - Bulk array transfer for large buffers (`readDoubles`, `writeDoubles`, `readRaw`, `writeRaw`)
 - `JitSession` keeps numeric, struct and array state across recompiles
 - Hot reload with a three-frame deferred unload, plus `Jit.watch` file polling
-- SEH guard around every call; `callFast` skips it for trusted code
+- A guard around every call contains a hardware fault: structured exception handling on Windows, a signal handler and `siglongjmp` on Linux; `callFast` skips it for trusted code
 - Content-addressed build cache with `exportPack` / `importPack` for machines without a compiler
 - Host bookkeeping behind a mutex, so calls, bindings and string returns work from several threads
 - No file in the cache is rewritten in place: the header, a module source, the precompiled header and the binary each arrive through a temporary name and a move, so a reader never sees half a file
@@ -190,7 +190,7 @@ The standard library, inline assembly, SIMD intrinsics and templates all work. T
 |---|---|
 | `ok` / `dll` / `image` / `symbols` / `ms` / `cached` / `diag` / `log` | State |
 | `call(name, a0..a5):Float` | Six `double` arguments, guarded |
-| `callFast(name, a0..a5):Float` | Same, without the SEH guard |
+| `callFast(name, a0..a5):Float` | Same, without the fault guard |
 | `callA(name, args)` | Variable argument count |
 | `callAuto(name, args, ?strs)` | Convert by scanned signature, picking the overload by argument count |
 | `callSig(name, sig, args, ?strs)` | Explicit signature, for overloads |
@@ -820,7 +820,8 @@ Time goes into compiler process startup and linking, not into the amount of code
 - Struct results by value land in a ring of eight per function and per thread, so the last eight results stay readable
 - Default arguments are filled from the declaration, so a call may pass fewer arguments than the signature lists
 - Overloads resolve by argument count, then by runtime argument types through `callDyn`; when two candidates score the same, `callDyn` reports it and the call needs `callSig`
-- Every guarded call costs an indirect jump; `callFast` removes the SEH guard but also removes crash containment
+- Every guarded call costs an indirect jump; `callFast` removes the fault guard but also removes crash containment
+- A fault caught on Linux leaves the C++ runtime as it was at the moment of the signal; a destroyed lock or a half written buffer is not repaired
 - Compilation needs a local compiler; target machines fall back to the cache
 - A C++ exception thrown by compiled code is caught at the boundary, reported as a failed call, and its `what()` text is written to the log
 - The exception handler of a hand mapped image is never reached: its unwind table is registered and lookups against it succeed, but the C++ runtime does not dispatch into the mapped copy, so such sources go through the system loader instead
@@ -838,7 +839,7 @@ Time goes into compiler process startup and linking, not into the amount of code
 
 ## Testing
 
-`test/` is a standalone console project with 406 assertions.
+`test/` is a standalone console project with 408 assertions.
 
 `example/` is a two file project that compiles a module and calls it:
 

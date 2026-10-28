@@ -243,19 +243,15 @@ unsigned int twiceU(unsigned int v) { return v * 2u; }
     ss.dispose();
 
     head("crash guard");
-    if (!JitPlatform.win) {
-      ok("crash guard needs a windows host", true, "skipped");
-    } else {
-      var crashMsg:String = null;
-      hxcpp_jit_r.JitHost.onError = function(method:String, n:String, msg:String) {
-        crashMsg = method + "/" + n;
-      };
-      var cm = Jit.compile("crash", "double boom(double x) { volatile int* p = 0; *p = 1; return x; }\n");
-      ok("crash module compiled", cm.ok);
-      eq("crash returns 0", Std.string(cm.callAuto("boom", [1])), "0");
-      eq("onError fired", Std.string(crashMsg), "callAuto/boom");
-      hxcpp_jit_r.JitHost.onError = null;
-    }
+    var crashMsg:String = null;
+    hxcpp_jit_r.JitHost.onError = function(method:String, n:String, msg:String) {
+      crashMsg = method + "/" + n;
+    };
+    var cm = Jit.compile("crash", "double boom(double x) { volatile int* p = 0; *p = 1; return x; }\n");
+    ok("crash module compiled", cm.ok);
+    eq("crash returns 0", Std.string(cm.callAuto("boom", [1])), "0");
+    eq("onError fired", Std.string(crashMsg), "callAuto/boom");
+    hxcpp_jit_r.JitHost.onError = null;
 
     head("pointer handle");
     var fp = am.ptr("half");

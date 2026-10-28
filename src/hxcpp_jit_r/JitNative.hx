@@ -52,6 +52,57 @@ static int rjit_guard_entry(void* entry, void* hinst, unsigned long reason, void
     return -1;
   }
 }
+#else
+#include <signal.h>
+#include <setjmp.h>
+
+static __thread sigjmp_buf rjit_jb;
+static __thread int rjit_guarded = 0;
+static int rjit_hooked = 0;
+
+static void rjit_sig_handler(int sig, siginfo_t* si, void* uc) {
+  if (rjit_guarded) {
+    rjit_guarded = 0;
+    siglongjmp(rjit_jb, 1);
+  }
+  struct sigaction dfl;
+  memset(&dfl, 0, sizeof(dfl));
+  dfl.sa_handler = SIG_DFL;
+  sigaction(sig, &dfl, 0);
+  raise(sig);
+}
+
+static void rjit_hook(void) {
+  if (rjit_hooked) return;
+  rjit_hooked = 1;
+  static const int sigs[4] = {SIGSEGV, SIGBUS, SIGFPE, SIGILL};
+  for (int i = 0; i < 4; i++) {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_sigaction = rjit_sig_handler;
+    sa.sa_flags = SA_SIGINFO | SA_ONSTACK | SA_NODEFER;
+    sigemptyset(&sa.sa_mask);
+    sigaction(sigs[i], &sa, 0);
+  }
+}
+
+static double rjit_guard2(double (*fn)(RJitCtx*, RJitArgs*), RJitCtx* c, RJitArgs* a) {
+  rjit_hook();
+  if (sigsetjmp(rjit_jb, 1) != 0) return rjit_nan();
+  rjit_guarded = 1;
+  double r = fn(c, a);
+  rjit_guarded = 0;
+  return r;
+}
+
+static double rjit_guard3(double (*fn)(RJitCtx*, void*, RJitArgs*), RJitCtx* c, void* f, RJitArgs* a) {
+  rjit_hook();
+  if (sigsetjmp(rjit_jb, 1) != 0) return rjit_nan();
+  rjit_guarded = 1;
+  double r = fn(c, f, a);
+  rjit_guarded = 0;
+  return r;
+}
 #endif
 
 static RJitHost* rjit_host_table = 0;
@@ -261,11 +312,7 @@ class JitNative {
     a.a[3] = a3;
     a.a[4] = a4;
     a.a[5] = a5;
-#ifdef _WIN32
     return rjit_guard2(reinterpret_cast<double(*)(RJitCtx*,RJitArgs*)>(fn), reinterpret_cast<RJitCtx*>(ctx), &a);
-#else
-    return reinterpret_cast<RJitFn>(fn)(reinterpret_cast<RJitCtx*>(ctx), &a);
-#endif
   ')
   public static function invoke(fn:cpp.SizeT, ctx:cpp.SizeT, n:Int, a0:Float, a1:Float, a2:Float, a3:Float, a4:Float, a5:Float):Float return 0;
 
@@ -288,11 +335,7 @@ class JitNative {
     if (q1 != 0) { a.s[1] = (const char*)q1; a.sl[1] = b1->length; a.sn = 2; }
     if (q2 != 0) { a.s[2] = (const char*)q2; a.sl[2] = b2->length; a.sn = 3; }
     if (q3 != 0) { a.s[3] = (const char*)q3; a.sl[3] = b3->length; a.sn = 4; }
-#ifdef _WIN32
     return rjit_guard2(reinterpret_cast<double(*)(RJitCtx*,RJitArgs*)>(fn), reinterpret_cast<RJitCtx*>(ctx), &a);
-#else
-    return reinterpret_cast<RJitFn>(fn)(reinterpret_cast<RJitCtx*>(ctx), &a);
-#endif
   ')
   public static function invokeB(fn:cpp.SizeT, ctx:cpp.SizeT, n:Int, a0:Float, a1:Float, a2:Float, a3:Float, a4:Float, a5:Float,
     b0:haxe.io.Bytes, b1:haxe.io.Bytes, b2:haxe.io.Bytes, b3:haxe.io.Bytes):Float return 0;
@@ -332,14 +375,9 @@ class JitNative {
     a.a[4] = a4;
     a.a[5] = a5;
     double addr = 0.0;
-#ifdef _WIN32
     addr = rjit_guard2(reinterpret_cast<double(*)(RJitCtx*,RJitArgs*)>(ptrFn), reinterpret_cast<RJitCtx*>(ctx), &a);
     if (addr != addr) return addr;
     return rjit_guard3(reinterpret_cast<double(*)(RJitCtx*,void*,RJitArgs*)>(disp), reinterpret_cast<RJitCtx*>(ctx), (void*)(size_t)addr, &a);
-#else
-    addr = reinterpret_cast<double(*)(RJitCtx*,RJitArgs*)>(ptrFn)(reinterpret_cast<RJitCtx*>(ctx), &a);
-    return reinterpret_cast<double(*)(RJitCtx*,void*,RJitArgs*)>(disp)(reinterpret_cast<RJitCtx*>(ctx), (void*)(size_t)addr, &a);
-#endif
   ')
   public static function callVia(disp:cpp.SizeT, ptrFn:cpp.SizeT, ctx:cpp.SizeT, n:Int, a0:Float, a1:Float, a2:Float, a3:Float, a4:Float, a5:Float):Float return 0;
 
@@ -363,14 +401,9 @@ class JitNative {
     if (q2 != 0) { a.s[2] = (const char*)q2; a.sl[2] = b2->length; a.sn = 3; }
     if (q3 != 0) { a.s[3] = (const char*)q3; a.sl[3] = b3->length; a.sn = 4; }
     double addr = 0.0;
-#ifdef _WIN32
     addr = rjit_guard2(reinterpret_cast<double(*)(RJitCtx*,RJitArgs*)>(ptrFn), reinterpret_cast<RJitCtx*>(ctx), &a);
     if (addr != addr) return addr;
     return rjit_guard3(reinterpret_cast<double(*)(RJitCtx*,void*,RJitArgs*)>(disp), reinterpret_cast<RJitCtx*>(ctx), (void*)(size_t)addr, &a);
-#else
-    addr = reinterpret_cast<double(*)(RJitCtx*,RJitArgs*)>(ptrFn)(reinterpret_cast<RJitCtx*>(ctx), &a);
-    return reinterpret_cast<double(*)(RJitCtx*,void*,RJitArgs*)>(disp)(reinterpret_cast<RJitCtx*>(ctx), (void*)(size_t)addr, &a);
-#endif
   ')
   public static function callViaB(disp:cpp.SizeT, ptrFn:cpp.SizeT, ctx:cpp.SizeT, n:Int, a0:Float, a1:Float, a2:Float, a3:Float, a4:Float, a5:Float,
     b0:haxe.io.Bytes, b1:haxe.io.Bytes, b2:haxe.io.Bytes, b3:haxe.io.Bytes):Float return 0;
