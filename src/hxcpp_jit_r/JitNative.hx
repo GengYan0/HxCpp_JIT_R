@@ -16,13 +16,14 @@ package hxcpp_jit_r;
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef _WIN32
 static double rjit_nan(void) {
   unsigned long long bits = 0x7FF8000000000000ULL;
   double d;
   memcpy(&d, &bits, sizeof(d));
   return d;
 }
+
+#ifdef _WIN32
 
 static double rjit_guard2(double (*fn)(RJitCtx*, RJitArgs*), RJitCtx* c, RJitArgs* a) {
   __try {
@@ -52,7 +53,9 @@ static int rjit_guard_entry(void* entry, void* hinst, unsigned long reason, void
     return -1;
   }
 }
-#else
+#endif
+
+#ifndef _WIN32
 #include <signal.h>
 #include <setjmp.h>
 
@@ -195,6 +198,7 @@ struct RJitArgs {
 };
 
 typedef double (*RJitFn)(RJitCtx*, RJitArgs*);
+
 
 #endif
 ')
