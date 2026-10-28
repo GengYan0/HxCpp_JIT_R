@@ -28,9 +28,22 @@ typedef JitMulti = {
 }
 
 class JitCompiler {
-  static var buildLock = new sys.thread.Mutex();
   static var DIAG_WIN = ~/^(.+?)\(([0-9]+)(,([0-9]+))?\) *: *(fatal error|error|warning) ?([A-Z]+[0-9]+)? *: *(.*)$/;
   static var DIAG_NIX = ~/^(.+?):([0-9]+)(:([0-9]+))?: *(fatal error|error|warning) ?([A-Z]+[0-9]+)? *: *(.*)$/;
+
+  static var lockMu = new sys.thread.Mutex();
+  static var keyLocks:Map<String, sys.thread.Mutex> = new Map();
+
+  static function keyLock(key:String):sys.thread.Mutex {
+    lockMu.acquire();
+    var m = keyLocks.get(key);
+    if (m == null) {
+      m = new sys.thread.Mutex();
+      keyLocks.set(key, m);
+    }
+    lockMu.release();
+    return m;
+  }
 
   public var tool:JitToolchain;
   public var cache:JitCache;
@@ -42,7 +55,6 @@ class JitCompiler {
   public var usePch:Bool = true;
   #if target.threaded
   static var pchLock = new sys.thread.Mutex();
-  static var active:Int = 0;
   #end
   var pchState:Int = 0;
   var pchFile:String = "";
@@ -58,7 +70,7 @@ class JitCompiler {
   }
 
   public function flagKey():String {
-    return JitCache.key("", tool.backend + "|" + std + "|" + opt + "|" + extra.join(" ") + "|" + JitAbi.VERSION);
+    return JitCache.key(JitAbi.HEADER, tool.backend + "|" + std + "|" + opt + "|" + extra.join(" ") + "|" + JitAbi.VERSION);
   }
 
   public function prepare():Bool {
@@ -132,6 +144,20 @@ class JitCompiler {
   }
 
   public function build(key:String, src:String, lineShift:Int = 0, sigs:Array<String> = null, multi:JitMulti = null):JitResult {
+    var mu = keyLock(key);
+    mu.acquire();
+    var r:JitResult = null;
+    try {
+      r = buildLocked(key, src, lineShift, sigs, multi);
+    } catch (e:Dynamic) {
+      mu.release();
+      throw e;
+    }
+    mu.release();
+    return r;
+  }
+
+  function buildLocked(key:String, src:String, lineShift:Int, sigs:Array<String>, multi:JitMulti):JitResult {
     var t0 = Sys.time();
     if (pchState != 1 && isMsvcLike()) prepare();
     var dir = cache.dirFor(key);
@@ -175,7 +201,6 @@ class JitCompiler {
     var out = cache.nextBinary(key);
     var body = pre + (tail == "" ? src : src + tail);
     var tmpOut = out + "." + Std.random(1000000) + ".tmp";
-    buildLock.acquire();
     if (!FileSystem.exists(cpp) || File.getContent(cpp) != body) JitCache.writeAtomic(cpp, body);
     var more = multi == null ? null : multi.files;
     var incs = multi == null ? null : multi.includes;
@@ -183,7 +208,6 @@ class JitCompiler {
     lastCommand = tool.exe + " " + args.join(" ");
     if (Jit.debug) Jit.log("[jit] exec " + lastCommand);
     var r = run(args);
-    buildLock.release();
     var log = r.err;
     var trimmed = StringTools.trim(r.out);
     if (trimmed != "" && trimmed != haxe.io.Path.withoutDirectory(cpp)) log = log + r.out;
@@ -272,6 +296,7 @@ class JitCompiler {
     else if (opt == "Ox") o = "O3";
     a.push("-shared");
     a.push("-fPIC");
+    a.push("-pthread");
     a.push("-" + o);
     a.push("-std=" + std);
     a.push("-DNDEBUG");
@@ -293,44 +318,58 @@ class JitCompiler {
   }
 
   function run(args:Array<String>):{code:Int, out:String, err:String} {
-    var p = new sys.io.Process(tool.exe, args);
-    var name = haxe.io.Path.withoutDirectory(tool.exe);
-    var timer:Null<haxe.Timer> = null;
-    var killed = [false];
-    var timedOut = timeoutMs > 0;
-    if (timedOut) {
-      #if target.threaded
-      active++;
-      #end
-      try {
-        timer = haxe.Timer.delay(function() {
-          try {
-            #if target.threaded
-            if (active > 1) return;
-            #end
-            killed[0] = true;
-            if (JitPlatform.win) Sys.command("taskkill", ["/F", "/T", "/IM", name]);
-            else Sys.command("pkill", ["-TERM", name]);
-          } catch (e:Dynamic) {}
-        }, timeoutMs);
-      } catch (e:Dynamic) {}
+    var p = try {
+      new sys.io.Process(tool.exe, args);
+    } catch (e:Dynamic) {
+      return {code: -1, out: "", err: "cannot start " + tool.exe + ": " + Std.string(e)};
     }
-    var eb = p.stderr.readAll();
-    var ob = p.stdout.readAll();
+    var eb:haxe.io.Bytes = null;
+    var ob:haxe.io.Bytes = null;
+    var done = new sys.thread.Lock();
+    var alive = [true];
+    var killed = [false];
+    if (timeoutMs > 0) {
+      #if target.threaded
+      try {
+        sys.thread.Thread.create(function() {
+          Sys.sleep(timeoutMs / 1000.0);
+          if (!alive[0]) return;
+          alive[0] = false;
+          killed[0] = true;
+          try untyped p.kill() catch (e:Dynamic) {}
+        });
+      } catch (e:Dynamic) {}
+      #end
+    }
+    #if target.threaded
+    try {
+      sys.thread.Thread.create(function() {
+        try eb = p.stderr.readAll() catch (e:Dynamic) {}
+        done.release();
+      });
+    } catch (e:Dynamic) {}
+    #end
+    try ob = p.stdout.readAll() catch (e:Dynamic) {}
+    #if target.threaded
+    done.wait();
+    #end
+    alive[0] = false;
     var code = p.exitCode();
     p.close();
-    if (timer != null) timer.stop();
-    if (timedOut) {
-      #if target.threaded
-      active--;
-      #end
-    }
     if (killed[0] && code == 0) code = -9;
     if (JitPlatform.win) {
       var cp = JitNative.getACP();
-      return {code: code, out: JitNative.decode(ob, cp), err: JitNative.decode(eb, cp)};
+      return {
+        code: code,
+        out: ob == null ? "" : JitNative.decode(ob, cp),
+        err: eb == null ? "" : JitNative.decode(eb, cp)
+      };
     }
-    return {code: code, out: ob.toString(), err: eb.toString()};
+    return {
+      code: code,
+      out: ob == null ? "" : ob.toString(),
+      err: eb == null ? "" : eb.toString()
+    };
   }
 
   public function parse(log:String, lineShift:Int = 0):Array<JitDiag> {

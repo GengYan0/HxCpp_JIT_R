@@ -49,7 +49,7 @@ class Jit {
 
   static var mods:Map<String, JitModule> = new Map();
   static var nextId:Int = 1;
-  static var retired:Array<{h:cpp.SizeT, t:Int, image:JitImage}> = [];
+  static var retired:Array<{h:cpp.SizeT, t:Int, image:JitImage, ctx:cpp.SizeT}> = [];
   static var jobs:Array<JitJob> = [];
   static var queue:Array<JitJob> = [];
   static var running:Int = 0;
@@ -87,7 +87,7 @@ class Jit {
     if (inited) return ready;
     inited = true;
     cache = new JitCache(cacheDir);
-    cache.prepare();
+    if (!cache.prepare() && verbose) Sys.println("[jit] cannot write " + cache.headerFile());
     JitNative.setHostThread();
     tool = JitToolchain.detect(o != null && o.backend != null ? o.backend : "auto");
     compiler = new JitCompiler(tool, cache);
@@ -140,7 +140,7 @@ class Jit {
     var std = compiler == null ? "c++17" : compiler.std;
     var opt = compiler == null ? "O2" : compiler.opt;
     var ex = compiler == null ? "" : compiler.extra.join(" ");
-    return "s" + std + "|o" + opt + "|cg" + JitCodegen.BUILD + extra + "|" + ex;
+    return "s" + std + "|o" + opt + "|cg" + JitCodegen.BUILD + "|h" + JitCache.key(JitAbi.HEADER, "").substr(0, 12) + extra + "|" + ex;
   }
 
   public static function log(s:String):Void {
@@ -153,7 +153,14 @@ class Jit {
     var savedLoader = loader;
     if (o != null && o.verbose != null) verbose = o.verbose;
     if (o != null && o.loader != null) loader = o.loader;
-    var m = compileNow(name, src, o);
+    var m:JitModule = null;
+    try {
+      m = compileNow(name, src, o);
+    } catch (e:Dynamic) {
+      verbose = savedVerbose;
+      loader = savedLoader;
+      throw e;
+    }
     verbose = savedVerbose;
     loader = savedLoader;
     return m;
@@ -232,11 +239,23 @@ class Jit {
     var force = o != null && o.force == true;
     var existing = force ? null : cache.dllFor(key);
     if (debug) log("[jit] existing " + existing);
+    var loaded = false;
     if (existing != null) {
       m.cached = true;
       totalCacheHits++;
-      if (!load(m, existing)) return m;
-    } else {
+      loaded = load(m, existing);
+      if (!loaded && ready) {
+        var why = m.diag.length > 0 ? m.diag[0].code : "E_LOAD";
+        if (verbose) log("[jit] cached binary rejected (" + why + "), rebuilding");
+        try FileSystem.deleteFile(existing) catch (e:Dynamic) {}
+        totalCacheHits--;
+        m.cached = false;
+        m.diag = [];
+        m.log = "";
+        m.image = null;
+      }
+    }
+    if (!loaded) {
       var t0 = Sys.time();
       var r = compiler.build(key, src, o == null ? 0 : (o.lineShift ?? 0), o == null ? null : o.sigs, multi);
       totalBuilds++;
@@ -272,9 +291,11 @@ class Jit {
   }
 
   static var cbCache:Map<String, Float> = new Map();
+  static var cbName = ~/^[A-Za-z_][A-Za-z0-9_]*$/;
 
   public static function callback(name:String, shape:String = "d(d)"):Float {
     ensure();
+    if (name == null || !cbName.match(name)) return 0;
     var key = name + "|" + shape;
     var hit = cbCache.get(key);
     if (hit != null) return hit;
@@ -311,8 +332,8 @@ class Jit {
     var body = text
       ? "if (!rjit_hs) return \"\";\n  return rjit_hs(" + arg + ");"
       : (ret == "void"
-        ? "(void)rjit_hc(" + arg + ");"
-        : "return (" + ret + ")rjit_hc(" + arg + ");");
+        ? "if (!rjit_hc) return;\n  (void)rjit_hc(" + arg + ");"
+        : "if (!rjit_hc) return 0;\n  return (" + ret + ")rjit_hc(" + arg + ");");
     var src = "typedef double (*RJitHC)(void*, const char*, int, double, double, double, double);\n"
       + "typedef const char* (*RJitHS)(void*, const char*, int, double, double, double, double);\n"
       + "static RJitHC rjit_hc = 0;\n"
@@ -424,8 +445,8 @@ class Jit {
     if (cur == m) mods.remove(m.name);
   }
 
-  public static function retire(h:cpp.SizeT, image:JitImage = null):Void {
-    if (h != 0 || image != null) retired.push({h: h, t: frame, image: image});
+  public static function retire(h:cpp.SizeT, image:JitImage = null, ctx:cpp.SizeT = 0):Void {
+    if (h != 0 || image != null || ctx != 0) retired.push({h: h, t: frame, image: image, ctx: ctx});
   }
 
   public static function watch(path:String, ?name:String, ?onReload:JitModule->Void):Bool {
@@ -495,6 +516,7 @@ class Jit {
       for (r in retired) {
         if (frame - r.t >= 3) {
           if (r.image != null) JitLoader.unload(r.image) else JitNative.unloadDll(r.h);
+          if (r.ctx != 0) JitNative.freeCtx(r.ctx);
         } else keep.push(r);
       }
       retired = keep;
@@ -526,7 +548,6 @@ class Jit {
       try {
         start(j);
       } catch (e:Dynamic) {
-        running--;
         j.result = null;
         j.done = true;
       }
@@ -627,7 +648,7 @@ class Jit {
     var map = loader == "auto" || loader == "manual";
     if (map && usesExceptions(m.src)) {
       map = false;
-      log("[jit] manual mapping cannot unwind C++ exceptions, using the system loader");
+      if (verbose) log("[jit] manual mapping cannot unwind C++ exceptions, using the system loader");
     }
     if (map) {
       var image = JitLoader.load(dll);

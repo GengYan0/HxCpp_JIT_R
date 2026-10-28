@@ -26,10 +26,18 @@ class JitCache {
     return root + "/rjit_abi.h";
   }
 
-  public function prepare():Void {
+  public function prepare():Bool {
     mkdirs(root);
     var h = headerFile();
-    if (!FileSystem.exists(h) || File.getContent(h) != JitAbi.HEADER) writeAtomic(h, JitAbi.HEADER);
+    if (FileSystem.exists(h)) {
+      var cur:String = null;
+      try cur = File.getContent(h) catch (e:Dynamic) {}
+      if (cur == JitAbi.HEADER) return true;
+    }
+    if (!writeAtomic(h, JitAbi.HEADER)) return false;
+    var after:String = null;
+    try after = File.getContent(h) catch (e:Dynamic) {}
+    return after == JitAbi.HEADER;
   }
 
   public static function writeAtomic(p:String, body:String):Bool {
@@ -43,14 +51,20 @@ class JitCache {
   }
 
   public static function publish(tmp:String, target:String):Bool {
+    if (!FileSystem.exists(tmp)) return false;
     try {
       FileSystem.rename(tmp, target);
       return true;
     } catch (e:Dynamic) {}
-    if (FileSystem.exists(target)) {
-      if (FileSystem.exists(tmp)) del(tmp);
-      return true;
+    if (!FileSystem.exists(target)) {
+      try {
+        FileSystem.rename(tmp, target);
+        return true;
+      } catch (e:Dynamic) {
+        return false;
+      }
     }
+    if (!del(target)) return false;
     try {
       FileSystem.rename(tmp, target);
       return true;
@@ -241,14 +255,6 @@ class JitCache {
 
   public static function key(src:String, flags:String):String {
     var s = "j" + JitAbi.VERSION + "|" + flags + "|" + src;
-    var a = h32(s, 5381);
-    var b = h32(s, 52711);
-    return StringTools.hex(a, 8) + StringTools.hex(b, 8);
-  }
-
-  static function h32(s:String, seed:Int):Int {
-    var h = seed;
-    for (i in 0...s.length) h = ((h * 16777619) ^ s.charCodeAt(i)) & 0x3FFFFFFF;
-    return h;
+    return haxe.crypto.Sha1.encode(s);
   }
 }
