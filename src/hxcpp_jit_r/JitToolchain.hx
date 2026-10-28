@@ -21,12 +21,11 @@ class JitToolchain {
 
   public function apply():Void {
     if (!ready) return;
-    #if windows
+    if (!JitPlatform.win) return;
     if (inc.length > 0) Sys.putEnv("INCLUDE", inc.join(";"));
     if (lib.length > 0) Sys.putEnv("LIB", lib.join(";"));
     if (bin.length > 0) Sys.putEnv("PATH", bin.join(";") + ";" + (Sys.getEnv("PATH") ?? ""));
     Sys.putEnv("VSLANG", "1033");
-    #end
   }
 
   public function summary():String {
@@ -40,14 +39,9 @@ class JitToolchain {
       d.error = "toolchain disabled by forceUnavailable";
       return d;
     }
-    #if windows
-    return detectWindows(prefer);
-    #else
-    return detectPosix(prefer);
-    #end
+    return JitPlatform.win ? detectWindows(prefer) : detectPosix(prefer);
   }
 
-  #if windows
   static function detectWindows(prefer:String):JitToolchain {
     var t = new JitToolchain();
     var is64 = #if HXCPP_M32 false #else true #end;
@@ -134,9 +128,7 @@ class JitToolchain {
     }
     return false;
   }
-  #end
 
-  #if !windows
   static function detectPosix(prefer:String):JitToolchain {
     var t = new JitToolchain();
     t.arch = #if HXCPP_M32 "x86" #else "x64" #end;
@@ -154,7 +146,6 @@ class JitToolchain {
     t.error = "neither clang++ nor g++ found on PATH";
     return t;
   }
-  #end
 
   static function parentOf(p:String, levels:Int):Null<String> {
     var q = normalize(p);
@@ -179,11 +170,7 @@ class JitToolchain {
   static function splitEnv(v:String):Array<String> {
     var out = [];
     if (v == null) return out;
-    #if windows
-    var sep = ";";
-    #else
-    var sep = ":";
-    #end
+    var sep = JitPlatform.win ? ";" : ":";
     for (p in v.split(sep)) {
       var q = StringTools.trim(p);
       if (q != "") out.push(normalize(q));

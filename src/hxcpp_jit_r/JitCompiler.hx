@@ -302,11 +302,8 @@ class JitCompiler {
             if (active > 1) return;
             #end
             killed[0] = true;
-            #if windows
-            Sys.command("taskkill", ["/F", "/T", "/IM", name]);
-            #else
-            Sys.command("pkill", ["-TERM", name]);
-            #end
+            if (JitPlatform.win) Sys.command("taskkill", ["/F", "/T", "/IM", name]);
+            else Sys.command("pkill", ["-TERM", name]);
           } catch (e:Dynamic) {}
         }, timeoutMs);
       } catch (e:Dynamic) {}
@@ -322,12 +319,11 @@ class JitCompiler {
       #end
     }
     if (killed[0] && code == 0) code = -9;
-    #if windows
-    var cp = JitNative.getACP();
-    return {code: code, out: JitNative.decode(ob, cp), err: JitNative.decode(eb, cp)};
-    #else
+    if (JitPlatform.win) {
+      var cp = JitNative.getACP();
+      return {code: code, out: JitNative.decode(ob, cp), err: JitNative.decode(eb, cp)};
+    }
     return {code: code, out: ob.toString(), err: eb.toString()};
-    #end
   }
 
   public function parse(log:String, lineShift:Int = 0):Array<JitDiag> {

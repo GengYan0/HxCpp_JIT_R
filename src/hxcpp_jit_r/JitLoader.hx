@@ -201,9 +201,7 @@ class JitLoader {
   }
 
   public static function load(path:String):JitImage {
-    #if !windows
-    return JitElf.load(path);
-    #end
+    if (!JitPlatform.win) return JitElf.load(path);
     var img = parse(path);
     if (!img.ok) return img;
     var bytes = File.getBytes(path);
@@ -500,13 +498,9 @@ class JitLoader {
       return true;
     }
     if (img.entry != 0) {
-      #if windows
-      JitNative.callEntry(at(img.base, img.entry), img.base, 0, 0);
-      #end
+      if (JitPlatform.win) JitNative.callEntry(at(img.base, img.entry), img.base, 0, 0);
     }
-    #if !windows
-    JitElf.runFiniArray(img);
-    #end
+    if (!JitPlatform.win) JitElf.runFiniArray(img);
     teardownTls(img);
     unregisterUnwind(img);
     img.fwdCache = new Map();

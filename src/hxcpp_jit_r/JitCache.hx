@@ -28,11 +28,7 @@ class JitCache {
   }
 
   public function ext():String {
-    #if windows
-    return ".dll";
-    #else
-    return ".so";
-    #end
+    return JitPlatform.win ? ".dll" : ".so";
   }
 
   public function dllFor(key:String):Null<String> {

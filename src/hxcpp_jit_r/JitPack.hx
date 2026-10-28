@@ -35,13 +35,11 @@ class JitPack {
   }
 
   static function platform():String {
-    #if windows
-    return "windows-x64";
-    #elseif mac
-    return "macos";
-    #else
-    return "linux";
-    #end
+    return switch (Sys.systemName()) {
+      case "Windows": "windows-x64";
+      case "Mac": "macos";
+      default: "linux";
+    };
   }
 
   public static function exportPack(root:String, dir:String, only:Map<String, Bool> = null):Int {

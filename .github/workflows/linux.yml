@@ -1,0 +1,55 @@
+name: linux
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Haxe and Neko
+        run: |
+          set -e
+          curl -sSL https://github.com/HaxeFoundation/haxe/releases/download/4.3.4/haxe-4.3.4-linux64.tar.gz -o haxe.tar.gz
+          curl -sSL https://github.com/HaxeFoundation/neko/releases/download/v2-3-0/neko-2.3.0-linux64.tar.gz -o neko.tar.gz
+          mkdir -p "$HOME/haxe" "$HOME/neko"
+          tar xzf haxe.tar.gz -C "$HOME/haxe" --strip-components=1
+          tar xzf neko.tar.gz -C "$HOME/neko" --strip-components=1
+          echo "$HOME/haxe" >> "$GITHUB_PATH"
+          echo "NEKOPATH=$HOME/neko" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$HOME/neko" >> "$GITHUB_ENV"
+
+      - name: Setup haxelib
+        run: |
+          set -e
+          haxe --version
+          g++ --version | head -1
+          haxelib setup "$HOME/haxelib"
+          haxelib install hxcpp --quiet
+
+      - name: Build tests
+        working-directory: test/linux
+        run: haxe build-linux.hxml
+
+      - name: Run tests
+        working-directory: test/linux
+        run: |
+          set -e
+          ./bin/Main | tee run.log
+          grep -q "RESULT PASS" run.log
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-report
+          path: test/linux/run.log
+          if-no-files-found: ignore

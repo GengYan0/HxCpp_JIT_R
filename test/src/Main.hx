@@ -11,6 +11,12 @@ import sys.thread.Thread;
 #end
 
 class Main {
+  static function tmpRoot():String {
+    var t = Sys.getEnv("TEMP");
+    if (t == null) t = Sys.getEnv("TMPDIR");
+    return t == null ? "/tmp" : t;
+  }
+
   static var pass = 0;
   static var fail = 0;
   static var out = new StringBuf();
@@ -37,7 +43,7 @@ class Main {
   static function main() {
     var t0 = Sys.time();
     out.add("[jit] backend probe\n");
-    Jit.cacheDir = Sys.getEnv("TEMP") + "/rjitcache";
+    Jit.cacheDir = tmpRoot() + "/rjitcache";
     if (!Jit.setup({opt: "O2"})) {
       Sys.println("setup failed: " + Jit.lastError);
       return;
@@ -411,7 +417,7 @@ double boom(double v) { if (v > 0) throw std::runtime_error("mapped"); return v;
     ok("cold compile", c1.ok);
     Jit.exportPack("packcold");
     hxcpp_jit_r.JitToolchain.forceUnavailable = true;
-    var coldDir = Sys.getEnv("TEMP") + "/rjitcold_" + Std.string(Std.int(Sys.time() * 1000)) + "_" + Std.string(Std.random(1000));
+    var coldDir = tmpRoot() + "/rjitcold_" + Std.string(Std.int(Sys.time() * 1000)) + "_" + Std.string(Std.random(1000));
     Jit.setup({cache: coldDir});
     ok("toolchain disabled", !Jit.ready, Jit.lastError);
     var beforeImp = Jit.compile("cold", coldSrc);
@@ -444,7 +450,7 @@ double boom(double v) { if (v > 0) throw std::runtime_error("mapped"); return v;
 
     head("concurrent cold build");
     var oldCache = Jit.cacheDir;
-    var cdir = Sys.getEnv("TEMP") + "/rjitconc_" + Std.string(Std.int(Sys.time() * 1000)) + "_" + Std.string(Std.random(1000));
+    var cdir = tmpRoot() + "/rjitconc_" + Std.string(Std.int(Sys.time() * 1000)) + "_" + Std.string(Std.random(1000));
     Jit.setup({cache: cdir});
     ok("cold cache switched", Jit.cache.root.indexOf("rjitconc_") >= 0, Jit.cache.root);
     Jit.maxParallel = 2;
