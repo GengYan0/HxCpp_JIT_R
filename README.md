@@ -1,6 +1,6 @@
 # HxCpp_JIT_R
 
-0.1.16
+0.1.17
 
 Compile and call native C++ while your application is running. Hand it a source string, get a module back, call its functions like any Haxe method.
 
