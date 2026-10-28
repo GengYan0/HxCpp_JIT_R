@@ -95,16 +95,25 @@ class JitCompiler {
       pchState = 1;
       return true;
     }
-    var src = base + "/pch_" + k + ".cpp";
+    var tag = Std.random(1000000);
+    var src = base + "/pch_" + k + "_" + tag + ".cpp";
+    var tmpPch = file + "." + tag + ".tmp";
+    var tmpObj = base + "/pch_" + k + "_" + tag + ".obj";
     File.saveContent(src, "int rjit_pch_anchor = 0;\n");
     var args = [
       "/nologo", "/c", "/utf-8", "/std:" + std, "/" + opt, "/EHsc", "/MT",
       "/DNDEBUG", "/DRJIT_DEFINE_ABI_EXPORT", "/D_CRT_SECURE_NO_WARNINGS",
-      "/Ycrjit_abi.h", "/Fp" + file, "/Fo:" + base + "/",
+      "/Ycrjit_abi.h", "/Fp" + tmpPch, "/Fo:" + base + "/",
       "/FIrjit_abi.h", "/I" + cache.root, src
     ];
     var r = run(args);
-    if (r.code != 0 || !FileSystem.exists(file) || !FileSystem.exists(obj)) {
+    var built = r.code == 0 && FileSystem.exists(tmpPch) && FileSystem.exists(tmpObj);
+    if (built && (!FileSystem.exists(file) || !FileSystem.exists(obj))) {
+      JitCache.publish(tmpPch, file);
+      JitCache.publish(tmpObj, obj);
+    }
+    for (q in [src, tmpPch, tmpObj]) if (FileSystem.exists(q)) try FileSystem.deleteFile(q) catch (e:Dynamic) {}
+    if (!FileSystem.exists(file) || !FileSystem.exists(obj)) {
       if (Jit.debug) Jit.log("[jit] pch unavailable: " + r.err);
       return false;
     }
@@ -167,7 +176,7 @@ class JitCompiler {
     var body = pre + (tail == "" ? src : src + tail);
     var tmpOut = out + "." + Std.random(1000000) + ".tmp";
     buildLock.acquire();
-    if (!FileSystem.exists(cpp) || File.getContent(cpp) != body) File.saveContent(cpp, body);
+    if (!FileSystem.exists(cpp) || File.getContent(cpp) != body) JitCache.writeAtomic(cpp, body);
     var more = multi == null ? null : multi.files;
     var incs = multi == null ? null : multi.includes;
     var args = isMsvcLike() ? msvcArgs(cpp, tmpOut, dir, more, incs) : gccArgs(cpp, tmpOut, dir, more, incs);
@@ -180,10 +189,7 @@ class JitCompiler {
     if (trimmed != "" && trimmed != haxe.io.Path.withoutDirectory(cpp)) log = log + r.out;
     var ok = r.code == 0 && FileSystem.exists(tmpOut);
     if (ok) {
-      try {
-        if (FileSystem.exists(out)) FileSystem.deleteFile(out);
-        FileSystem.rename(tmpOut, out);
-      } catch (e:Dynamic) {}
+      JitCache.publish(tmpOut, out);
       ok = FileSystem.exists(out);
     }
     if (FileSystem.exists(tmpOut)) try FileSystem.deleteFile(tmpOut) catch (e:Dynamic) {}

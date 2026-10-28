@@ -1,6 +1,6 @@
 # HxCpp_JIT_R
 
-0.1.12
+0.1.13
 
 Compile and call native C++ while your application is running. Hand it a source string, get a module back, call its functions like any Haxe method.
 
@@ -36,7 +36,7 @@ Behind the call the source goes into a cache directory, is compiled into a share
 - SEH guard around every call; `callFast` skips it for trusted code
 - Content-addressed build cache with `exportPack` / `importPack` for machines without a compiler
 - Host bookkeeping behind a mutex, so calls, bindings and string returns work from several threads
-- A compiled artifact is written under a temporary name and moved into place, so concurrent builders do not corrupt each other
+- No file in the cache is rewritten in place: the header, a module source, the precompiled header and the binary each arrive through a temporary name and a move, so a reader never sees half a file
 - A build keeps the two newest binaries of a module and drops leftover temporaries, so reloading does not grow the cache; `Jit.clean()` prunes every module directory
 - A handle taken before `dispose` reports `valid() == false` and returns zero instead of jumping into an unloaded image
 - A module whose source contains `throw`, `catch` or `try` is loaded through the system loader even when manual mapping is requested, because a hand mapped image cannot unwind a C++ exception
@@ -826,7 +826,7 @@ Time goes into compiler process startup and linking, not into the amount of code
 
 ## Testing
 
-`test/` is a standalone console project with 401 assertions.
+`test/` is a standalone console project with 403 assertions.
 
 `example/` is a two file project that compiles a module and calls it:
 

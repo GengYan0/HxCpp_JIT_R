@@ -18,6 +18,14 @@ class Main {
     return p.length > 2 && p.charAt(1) == ":";
   }
 
+  static function countSuffix(p:String, suf:String):Int {
+    if (!sys.FileSystem.exists(p)) return 0;
+    if (!sys.FileSystem.isDirectory(p)) return StringTools.endsWith(p, suf) ? 1 : 0;
+    var n = 0;
+    for (f in sys.FileSystem.readDirectory(p)) n += countSuffix(p + "/" + f, suf);
+    return n;
+  }
+
   static function rmTree(p:String):Void {
     if (!sys.FileSystem.exists(p)) return;
     try {
@@ -1016,6 +1024,8 @@ double apply2(int (*f)(int), double v) { return (double)f((int)v); }
     ok("old binaries pruned", bins.length <= 2, bins.join(","));
     ok("clean drops temp files", freed > 0 && !sys.FileSystem.exists(stray), "freed=" + freed);
     ok("clean keeps the newest binary", sys.FileSystem.exists(Jit.cache.dllFor(pm2.key) ?? ""), "");
+    eq("no half written sources left", Std.string(countSuffix(Jit.cache.root, ".w")), "0");
+    eq("no pch leftovers", Std.string(countSuffix(Jit.cache.root + "/pch", ".tmp")), "0");
 
     head("throughput");
     var pm = Jit.compile("perf", "RJIT(mix) { double s = 0; for (int i = 0; i < 8; i++) s += (double)i * RJIT_A0; return s; }\n");

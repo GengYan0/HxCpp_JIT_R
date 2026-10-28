@@ -29,7 +29,34 @@ class JitCache {
   public function prepare():Void {
     mkdirs(root);
     var h = headerFile();
-    if (!FileSystem.exists(h) || File.getContent(h) != JitAbi.HEADER) File.saveContent(h, JitAbi.HEADER);
+    if (!FileSystem.exists(h) || File.getContent(h) != JitAbi.HEADER) writeAtomic(h, JitAbi.HEADER);
+  }
+
+  public static function writeAtomic(p:String, body:String):Bool {
+    var t = p + "." + Std.random(1000000) + ".w";
+    try File.saveContent(t, body) catch (e:Dynamic) return false;
+    if (!publish(t, p)) {
+      if (FileSystem.exists(t)) del(t);
+      return false;
+    }
+    return true;
+  }
+
+  public static function publish(tmp:String, target:String):Bool {
+    try {
+      FileSystem.rename(tmp, target);
+      return true;
+    } catch (e:Dynamic) {}
+    if (FileSystem.exists(target)) {
+      if (FileSystem.exists(tmp)) del(tmp);
+      return true;
+    }
+    try {
+      FileSystem.rename(tmp, target);
+      return true;
+    } catch (e:Dynamic) {
+      return false;
+    }
   }
 
   public function dirFor(key:String):String {
