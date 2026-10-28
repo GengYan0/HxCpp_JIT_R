@@ -110,6 +110,12 @@ class JitHost {
     return getVar(key);
   }
 
+  public static function onCallStr(id:Int, name:String, a0:Float, a1:Float, a2:Float, a3:Float):String {
+    var f = sync(function() return binds.get(name));
+    if (f != null) return Std.string(Reflect.callMethod(null, f, [a0, a1, a2, a3]));
+    return "";
+  }
+
   public static function onCall(id:Int, name:String, a0:Float, a1:Float, a2:Float, a3:Float):Float {
     var f = sync(function() return binds.get(name));
     if (f != null) return cast Reflect.callMethod(null, f, [a0, a1, a2, a3]);

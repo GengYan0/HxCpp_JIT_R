@@ -1,6 +1,6 @@
 # HxCpp_JIT_R
 
-0.1.13
+0.1.14
 
 Compile and call native C++ while your application is running. Hand it a source string, get a module back, call its functions like any Haxe method.
 
@@ -21,7 +21,7 @@ Behind the call the source goes into a cache directory, is compiled into a share
 - Pointer variables and pointer arrays: read, write, repoint, and `&name` for the address
 - Pointer, `const char*` and `std::string` members of structs, and `std::string` / `const char*` globals, read with `str()` and written with `setStr()`
 - Struct, scalar and string reference parameters, struct results by value read through a handle, and exceptions trapped at the boundary
-- Function pointer arguments: `Jit.callback(name, shape)` compiles a stub that forwards to a callback registered with `Jit.bind`
+- Function pointer arguments: `Jit.callback(name, shape)` compiles a stub that forwards to a callback registered with `Jit.bind`, numeric or text
 - `const char*` results read straight back by `callStr`
 - Zero-compile reads and writes for globals, struct fields, array elements and array members (`g.row[2]`, `gs[1].row[2]`)
 - Handles resolved once at load, so the call path never reaches the symbol table
@@ -638,6 +638,18 @@ RJIT(emit) {
 ');
 ```
 
+A stub that a native function can call back through is built from a shape: `d(d)` takes one number and returns one, `v()` returns nothing, `s(d)` returns text.
+
+```haxe
+Jit.bind("label", (a, b, c, d) -> "len" + Std.int(a));
+var fp = Jit.callback("label", "s(d)");
+
+Jit.compile("cbstr", 'int slen(const char* (*f)(double), double v) { const char* s = f(v); int n = 0; while (s[n]) n++; return n; }')
+  .callAuto("slen", [fp, 3]);         // 4
+```
+
+The text a string callback returns belongs to the host and stays valid until the next call to that callback.
+
 ### Session
 
 ```haxe
@@ -826,7 +838,7 @@ Time goes into compiler process startup and linking, not into the amount of code
 
 ## Testing
 
-`test/` is a standalone console project with 403 assertions.
+`test/` is a standalone console project with 406 assertions.
 
 `example/` is a two file project that compiles a module and calls it:
 

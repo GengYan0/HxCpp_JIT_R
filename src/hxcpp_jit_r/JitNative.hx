@@ -95,6 +95,14 @@ extern "C" RJIT_HOST_EXPORT double rjit_host_call(void* m, const char* n, int le
   return rjit_host_table ? rjit_host_table->call(m, n, len, a0, a1, a2, a3) : 0.0;
 }
 
+extern "C" RJIT_HOST_EXPORT const char* rjit_host_str(void* m, const char* n, int len, double a0, double a1, double a2, double a3) {
+  static thread_local ::String held;
+  held = rjit_host_table
+    ? ::hxcpp_jit_r::JitNative_obj::onCallStr((int)(size_t)m, ::String::create(n, len), a0, a1, a2, a3)
+    : ::String("");
+  return held.utf8_str();
+}
+
 static int rjit_tls_register(size_t size, const void* init, size_t initSize) {
   if (rjit_tls_n >= 32) return 0;
   int k = rjit_tls_n++;
@@ -146,6 +154,10 @@ class JitNative {
 
   public static function onCall(id:Int, name:String, a0:Float, a1:Float, a2:Float, a3:Float):Float {
     return JitHost.onCall(id, name, a0, a1, a2, a3);
+  }
+
+  public static function onCallStr(id:Int, name:String, a0:Float, a1:Float, a2:Float, a3:Float):String {
+    return JitHost.onCallStr(id, name, a0, a1, a2, a3);
   }
 
   public static function onRetStr(id:Int, s:String):Void {
@@ -574,6 +586,12 @@ class JitNative {
 
   @:functionCode('return rjit_host_table ? (size_t)rjit_host_table->call : 0;')
   public static function hostCall():cpp.SizeT return 0;
+
+  @:functionCode('return (size_t)&rjit_host_str;')
+  public static function hostStr():cpp.SizeT return 0;
+
+  @:functionCode('((void(*)(void*,void*))(size_t)fn)((void*)(size_t)a, (void*)(size_t)b); return 0.0;')
+  public static function callVoid2(fn:cpp.SizeT, a:cpp.SizeT, b:cpp.SizeT):Float return 0;
 
   @:functionCode('return (size_t)&rjit_tls_get;')
   public static function tlsAddr():cpp.SizeT return 0;

@@ -985,6 +985,12 @@ double apply2(int (*f)(int), double v) { return (double)f((int)v); }
     eq("callback invoked", Std.string(cbm.callAuto("apply1", [fp1, 9])), "4.5");
     var fp2 = Jit.callback("plusone", "i(i)");
     eq("second callback invoked", Std.string(cbm.callAuto("apply2", [fp2, 41])), "42");
+    Jit.bind("label", function(a0:Float, a1:Float, a2:Float, a3:Float):Dynamic return "len" + Std.int(a0));
+    var cstr = Jit.compile("cbstr", 'int slen(const char* (*f)(double), double v) { const char* s = f(v); int n = 0; while (s[n]) n++; return n; }');
+    ok("string callback host compiles", cstr.ok, cstr.diag.length > 0 ? JitCompiler.describe(cstr.diag[0]) : "");
+    var fsp = Jit.callback("label", "s(d)");
+    ok("string callback built", fsp != 0, "");
+    eq("string callback text", Std.string(cstr.callAuto("slen", [fsp, 3])), "4");
 
     head("lifecycle and threads");
     var lm = Jit.compile("lifecycle", 'int one() { return 1; }');

@@ -278,6 +278,7 @@ class Jit {
       case "i": "int";
       case "f": "float";
       case "v": "void";
+      case "s": "const char*";
       default: null;
     };
     if (ret == null) return 0;
@@ -297,15 +298,19 @@ class Jit {
       vs.push(c == "p" ? "(double)(size_t)a" + (ps.length - 1) : "(double)a" + (ps.length - 1));
     }
     while (vs.length < 4) vs.push("0.0");
-    var body = ret == "void"
-      ? "(void)f((void*)0, \"" + name + "\", (int)strlen(\"" + name + "\"), " + vs.join(", ") + ");"
-      : "return (" + ret + ")f((void*)0, \"" + name + "\", (int)strlen(\"" + name + "\"), " + vs.join(", ") + ");";
+    var arg = "(void*)0, \"" + name + "\", (int)strlen(\"" + name + "\"), " + vs.join(", ");
+    var text = ret == "const char*";
+    var body = text
+      ? "if (!rjit_hs) return \"\";\n  return rjit_hs(" + arg + ");"
+      : (ret == "void"
+        ? "(void)rjit_hc(" + arg + ");"
+        : "return (" + ret + ")rjit_hc(" + arg + ");");
     var src = "typedef double (*RJitHC)(void*, const char*, int, double, double, double, double);\n"
+      + "typedef const char* (*RJitHS)(void*, const char*, int, double, double, double, double);\n"
       + "static RJitHC rjit_hc = 0;\n"
-      + 'extern "C" RJIT_API void rjit_cb_bind(void* f) { rjit_hc = (RJitHC)f; }\n'
+      + "static RJitHS rjit_hs = 0;\n"
+      + 'extern "C" RJIT_API void rjit_cb_bind(void* f, void* t) { rjit_hc = (RJitHC)f; rjit_hs = (RJitHS)t; }\n'
       + 'extern "C" RJIT_API ' + ret + " rjit_cb(" + ps.join(", ") + ") {\n"
-      + "  RJitHC f = rjit_hc;\n"
-      + "  if (!f) return (" + ret + ")0;\n"
       + "  " + body + "\n}\n";
     var m = compile("rjitcb_" + name + "_" + new EReg("[^A-Za-z0-9]", "g").replace(shape, "_"), src);
     if (!m.ok) {
@@ -313,7 +318,7 @@ class Jit {
       return 0;
     }
     var bind = m.resolve("rjit_cb_bind");
-    if (bind != 0) JitNative.invoke(bind, JitNative.hostCall(), 0, 0, 0, 0, 0, 0, 0);
+    if (bind != 0) JitNative.callVoid2(bind, JitNative.hostCall(), JitNative.hostStr());
     var a = JitNative.toFloat(m.resolve("rjit_cb"));
     if (a != 0) cbCache.set(key, a);
     return a;
