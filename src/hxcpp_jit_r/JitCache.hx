@@ -7,8 +7,19 @@ class JitCache {
   public var root:String;
 
   public function new(root:String) {
-    var n = normalize(root);
-    this.root = try FileSystem.fullPath(n) catch (e:Dynamic) n;
+    var n = root == null || root == "" ? "." : normalize(root);
+    var p = n;
+    if (FileSystem.exists(n)) {
+      p = try FileSystem.fullPath(n) catch (e:Dynamic) n;
+    } else if (!isAbsolute(n)) {
+      p = normalize(Sys.getCwd()) + "/" + n;
+    }
+    this.root = p == null || p == "" || p == "null" ? "." : p;
+  }
+
+  static function isAbsolute(p:String):Bool {
+    if (p.substr(0, 1) == "/") return true;
+    return p.length > 2 && p.charAt(1) == ":" && (p.charAt(2) == "/" || p.charAt(2) == "\\");
   }
 
   public function headerFile():String {

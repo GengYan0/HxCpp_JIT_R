@@ -6,11 +6,30 @@ import hxcpp_jit_r.JitCompiler;
 import hxcpp_jit_r.JitElf;
 import hxcpp_jit_r.JitPtr;
 import hxcpp_jit_r.JitLoader;
+import hxcpp_jit_r.JitPlatform;
 #if cpp
 import sys.thread.Thread;
 #end
 
 class Main {
+  static function absPath(p:String):Bool {
+    if (p == null) return false;
+    if (p.substr(0, 1) == "/") return true;
+    return p.length > 2 && p.charAt(1) == ":";
+  }
+
+  static function rmTree(p:String):Void {
+    if (!sys.FileSystem.exists(p)) return;
+    try {
+      if (sys.FileSystem.isDirectory(p)) {
+        for (f in sys.FileSystem.readDirectory(p)) rmTree(p + "/" + f);
+        sys.FileSystem.deleteDirectory(p);
+      } else {
+        sys.FileSystem.deleteFile(p);
+      }
+    } catch (e:Dynamic) {}
+  }
+
   static function tmpRoot():String {
     var t = Sys.getEnv("TEMP");
     if (t == null) t = Sys.getEnv("TMPDIR");
@@ -49,6 +68,7 @@ class Main {
       return;
     }
     out.add("  " + Jit.tool.summary() + "\n");
+    ok("cache root resolved", Jit.cache.root.indexOf("rjitcache") >= 0 && absPath(Jit.cache.root), Jit.cache.root);
     ok("setup ready", Jit.ready, Std.int((Sys.time() - t0) * 1000) + "ms");
 
     head("backend fallback");
@@ -381,7 +401,7 @@ int ids[3];
       ok("manual second module", top.ok, top.diag.length > 0 ? JitCompiler.describe(top.diag[0]) : "");
       eq("manual tri", Std.string(top.callAuto("tri", [5])), "15");
       Jit.dispose("man2");
-      ok("manual unwind table", img.fnTable != 0, "entries=" + img.fnCount);
+      ok("manual unwind table", !JitPlatform.win || img.fnTable != 0, "entries=" + img.fnCount);
       var mth = Jit.compile("manthrow", '#include <stdexcept>
 double boom(double v) { if (v > 0) throw std::runtime_error("mapped"); return v; }
 ', {loader: "manual"});
@@ -409,7 +429,7 @@ double boom(double v) { if (v > 0) throw std::runtime_error("mapped"); return v;
     ok("pack manifest ok", StringTools.startsWith(pi, "pack ok"), pi);
     ok("manifest exists", sys.FileSystem.exists("packout/manifest.json"));
     var strsMod = Jit.get("strs");
-    ok("headline dll packed", strsMod != null && sys.FileSystem.exists("packout/" + strsMod.key + "/mod.dll"));
+    ok("headline dll packed", strsMod != null && sys.FileSystem.exists("packout/" + strsMod.key + "/mod" + Jit.cache.ext()));
 
     head("cache-only mode (no toolchain)");
     var coldSrc = "double twice(double v) { return v * 2; }\n";
@@ -428,6 +448,7 @@ double boom(double v) { if (v > 0) throw std::runtime_error("mapped"); return v;
     ok("cache-only hit", c2.ok && c2.cached, c2.diag.length > 0 ? JitCompiler.describe(c2.diag[0]) : ("cached=" + c2.cached));
     eq("cache-only call", Std.string(c2.callAuto("twice", [21])), "42");
     hxcpp_jit_r.JitToolchain.forceUnavailable = false;
+    rmTree(coldDir);
     Jit.setup({cache: "jitcache"});
     ok("toolchain restored", Jit.ready);
 
@@ -452,7 +473,7 @@ double boom(double v) { if (v > 0) throw std::runtime_error("mapped"); return v;
     var oldCache = Jit.cacheDir;
     var cdir = tmpRoot() + "/rjitconc_" + Std.string(Std.int(Sys.time() * 1000)) + "_" + Std.string(Std.random(1000));
     Jit.setup({cache: cdir});
-    ok("cold cache switched", Jit.cache.root.indexOf("rjitconc_") >= 0, Jit.cache.root);
+    ok("cold cache switched", Jit.cache.root.indexOf("rjitconc_") >= 0 && absPath(Jit.cache.root), Jit.cache.root);
     Jit.maxParallel = 2;
     var done = 0;
     var faults:Array<String> = [];
@@ -472,6 +493,7 @@ double boom(double v) { if (v > 0) throw std::runtime_error("mapped"); return v;
     }
     ok("concurrent cold build", done == 4, "done=" + done + " pending=" + Jit.pending() + " ticks=" + spin + (faults.length > 0 ? " " + faults.join(" | ") : ""));
     Jit.maxParallel = 2;
+    rmTree(cdir);
     Jit.setup({cache: oldCache});
     ok("cache restored", Jit.cache.root.indexOf("jitcache") >= 0, Jit.cache.root);
 
