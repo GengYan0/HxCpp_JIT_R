@@ -85,7 +85,13 @@ extern "C" void* rjit_tls_get(void* idx) {
   return (void*)((char*)b + off);
 }
 
-extern "C" __declspec(dllexport) double rjit_host_call(void* m, const char* n, int len, double a0, double a1, double a2, double a3) {
+#ifdef _WIN32
+#define RJIT_HOST_EXPORT __declspec(dllexport)
+#else
+#define RJIT_HOST_EXPORT __attribute__((visibility("default")))
+#endif
+
+extern "C" RJIT_HOST_EXPORT double rjit_host_call(void* m, const char* n, int len, double a0, double a1, double a2, double a3) {
   return rjit_host_table ? rjit_host_table->call(m, n, len, a0, a1, a2, a3) : 0.0;
 }
 
@@ -488,7 +494,7 @@ class JitNative {
     if (n <= 0) return ::String("");
 #ifndef _WIN32
     return bytes->toString();
-#endif
+#else
     if (n < 0) return ::String("");
     const char* src = (const char*)bytes->b->Pointer();
     if (src == 0) return ::String("");
@@ -508,6 +514,7 @@ class JitNative {
     free(wb);
     free(ub);
     return r;
+#endif
   ')
   public static function decode(bytes:haxe.io.Bytes, cp:Int):String return "";
 
