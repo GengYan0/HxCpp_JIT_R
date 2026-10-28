@@ -491,6 +491,11 @@ class JitElf {
           ? JitNative.toFloat(JitNative.tlsAddr())
           : JitNative.toFloat(JitNative.getProcGlobal(name));
       }
+      var weak = (stInfo >> 4) == 2;
+      if (sVal == 0.0 && weak) {
+        img.relocCount++;
+        continue;
+      }
       if (sVal == 0.0) {
         img.error = "unresolved symbol " + (name == "" ? "#" + symIdx : name);
         return false;
