@@ -21,3 +21,5 @@ test/bin/
 Thumbs.db
 .idea/
 .vscode/
+
+.rel.json

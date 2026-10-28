@@ -395,6 +395,7 @@ class Jit {
     if (m == null) return;
     mods.remove(name);
     m.dispose();
+    if (StringTools.startsWith(name, "rjitcb_")) cbCache.clear();
   }
 
   public static function disposeAll():Void {

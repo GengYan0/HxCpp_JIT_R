@@ -4,9 +4,9 @@
   "license": "MIT",
   "tags": ["cpp", "jit", "native", "windows", "msvc", "runtime", "hot-reload"],
   "description": "Compile and call native C++ from a hxcpp application at runtime.",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "classPath": "src",
-  "releasenote": "beta: function pointer arguments through Jit.callback",
+  "releasenote": "beta: host locking, atomic artifact publish, handle invalidation after dispose",
   "contributors": ["GengYan0"],
   "dependencies": {}
 }

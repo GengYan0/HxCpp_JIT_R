@@ -22,11 +22,11 @@ class JitFn {
   }
 
   public function valid():Bool {
-    return fp != 0 && disp != 0;
+    return fp != 0 && disp != 0 && mod.alive;
   }
 
   public function call(a0:Float = 0.0, a1:Float = 0.0, a2:Float = 0.0, a3:Float = 0.0, a4:Float = 0.0, a5:Float = 0.0):Float {
-    if (fp == 0 || disp == 0) return 0.0;
+    if (fp == 0 || disp == 0 || !mod.alive) return 0.0;
     mod.countCall();
     var r = str
       ? JitNative.callViaB(disp, fp, ctx, 6, a0, a1, a2, a3, a4, a5, null, null, null, null)
@@ -35,7 +35,7 @@ class JitFn {
   }
 
   public function callA(args:Array<Float>, ?strs:Array<String>):Float {
-    if (fp == 0 || disp == 0) return 0.0;
+    if (fp == 0 || disp == 0 || !mod.alive) return 0.0;
     var ar = args == null ? [] : args;
     var n = ar.length;
     mod.countCall();

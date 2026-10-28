@@ -28,6 +28,7 @@ typedef JitMulti = {
 }
 
 class JitCompiler {
+  static var buildLock = new sys.thread.Mutex();
   static var DIAG_WIN = ~/^(.+?)\(([0-9]+)(,([0-9]+))?\) *: *(fatal error|error|warning) ?([A-Z]+[0-9]+)? *: *(.*)$/;
   static var DIAG_NIX = ~/^(.+?):([0-9]+)(:([0-9]+))?: *(fatal error|error|warning) ?([A-Z]+[0-9]+)? *: *(.*)$/;
 
@@ -162,18 +163,30 @@ class JitCompiler {
     var tail = JitCodegen.emit(fns, vars, sigs, structsAll, externs);
     var pre = needsStringHeader(texts.join("\n")) ? "#include <string>\n" : "";
     var shift = lineShift + (pre == "" ? 0 : 1);
-    File.saveContent(cpp, pre + (tail == "" ? src : src + tail));
     var out = cache.nextBinary(key);
+    var body = pre + (tail == "" ? src : src + tail);
+    var tmpOut = out + "." + Std.random(1000000) + ".tmp";
+    buildLock.acquire();
+    if (!FileSystem.exists(cpp) || File.getContent(cpp) != body) File.saveContent(cpp, body);
     var more = multi == null ? null : multi.files;
     var incs = multi == null ? null : multi.includes;
-    var args = isMsvcLike() ? msvcArgs(cpp, out, dir, more, incs) : gccArgs(cpp, out, dir, more, incs);
+    var args = isMsvcLike() ? msvcArgs(cpp, tmpOut, dir, more, incs) : gccArgs(cpp, tmpOut, dir, more, incs);
     lastCommand = tool.exe + " " + args.join(" ");
     if (Jit.debug) Jit.log("[jit] exec " + lastCommand);
     var r = run(args);
+    buildLock.release();
     var log = r.err;
     var trimmed = StringTools.trim(r.out);
     if (trimmed != "" && trimmed != haxe.io.Path.withoutDirectory(cpp)) log = log + r.out;
-    var ok = r.code == 0 && FileSystem.exists(out);
+    var ok = r.code == 0 && FileSystem.exists(tmpOut);
+    if (ok) {
+      try {
+        if (FileSystem.exists(out)) FileSystem.deleteFile(out);
+        FileSystem.rename(tmpOut, out);
+      } catch (e:Dynamic) {}
+      ok = FileSystem.exists(out);
+    }
+    if (FileSystem.exists(tmpOut)) try FileSystem.deleteFile(tmpOut) catch (e:Dynamic) {}
     return {
       ok: ok,
       dll: ok ? JitCache.normalize(out) : "",

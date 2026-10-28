@@ -16,6 +16,7 @@ typedef JitSeg = {
 class JitModule {
   public var name:String;
   public var id:Int;
+  public var alive:Bool = true;
   public var key:String;
   public var src:String;
   public var dll:String = "";
@@ -967,6 +968,7 @@ class JitModule {
   }
 
   public function dispose():Void {
+    alive = false;
     Jit.forget(this);
     if (handle != 0) {
       var d = resolve("rjit_deinit");

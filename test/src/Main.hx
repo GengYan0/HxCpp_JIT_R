@@ -6,6 +6,9 @@ import hxcpp_jit_r.JitCompiler;
 import hxcpp_jit_r.JitElf;
 import hxcpp_jit_r.JitPtr;
 import hxcpp_jit_r.JitLoader;
+#if cpp
+import sys.thread.Thread;
+#end
 
 class Main {
   static var pass = 0;
@@ -932,6 +935,31 @@ double apply2(int (*f)(int), double v) { return (double)f((int)v); }
     eq("callback invoked", Std.string(cbm.callAuto("apply1", [fp1, 9])), "4.5");
     var fp2 = Jit.callback("plusone", "i(i)");
     eq("second callback invoked", Std.string(cbm.callAuto("apply2", [fp2, 41])), "42");
+
+    head("lifecycle and threads");
+    var lm = Jit.compile("lifecycle", 'int one() { return 1; }');
+    var lf = lm.bind("one");
+    ok("bound handle valid", lf.valid(), "");
+    Jit.dispose("lifecycle");
+    ok("handle invalid after dispose", !lf.valid(), "");
+    eq("stale handle returns zero", Std.string(lf.call()), "0");
+
+    var tm = Jit.compile("threaded", 'double scale(double v) { return v * 2; }');
+    var slots = [0.0, 0.0];
+    for (i in 0...2) {
+      var idx = i;
+      Thread.create(function() {
+        var acc = 0.0;
+        for (k in 0...200) acc += tm.callAuto("scale", [k * 1.0]);
+        slots[idx] = acc;
+      });
+    }
+    var spin = 0;
+    while ((slots[0] == 0 || slots[1] == 0) && spin < 2000) {
+      Sys.sleep(0.01);
+      spin++;
+    }
+    eq("concurrent calls agree", Std.string(slots[0] + slots[1]), "79600");
 
     head("throughput");
     var pm = Jit.compile("perf", "RJIT(mix) { double s = 0; for (int i = 0; i < 8; i++) s += (double)i * RJIT_A0; return s; }\n");

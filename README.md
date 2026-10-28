@@ -1,6 +1,6 @@
 # HxCpp_JIT_R
 
-0.1.7
+0.1.8
 
 Compile and call native C++ while your application is running. Hand it a source string, get a module back, call its functions like any Haxe method.
 
@@ -33,6 +33,9 @@ Behind the call the source goes into a cache directory, is compiled into a share
 - Hot reload with a three-frame deferred unload, plus `Jit.watch` file polling
 - SEH guard around every call; `callFast` skips it for trusted code
 - Content-addressed build cache with `exportPack` / `importPack` for machines without a compiler
+- Host bookkeeping behind a mutex, so calls, bindings and string returns work from several threads
+- A compiled artifact is written under a temporary name and moved into place, so concurrent builders do not corrupt each other
+- A handle taken before `dispose` reports `valid() == false` and returns zero instead of jumping into an unloaded image
 - Manual image mapping as an alternative to `LoadLibrary`, with the same control on Linux over ELF
 - Asynchronous compilation with a concurrency gate
 - Diagnostics mapped back to the original source line
@@ -810,12 +813,14 @@ Time goes into compiler process startup and linking, not into the amount of code
 - ELF manual mapping serves thread-local storage through a general-dynamic resolver it installs itself; an image that addresses TLS through the thread pointer instead is handed to the system loader, even with `loader: "manual"`
 - Reference parameters cover scalars, structs and `std::string`; a mutable `std::string&` writes back through `callStr` or `callStrBoth`, and other reference types need a wrapper
 - Changing the ABI header layout requires clearing the host precompiled header and rebuilding
+- A callback that fires on a native thread runs on that thread; it may not touch Haxe objects that belong to another thread
+- The build lock is per process; two processes building the same key at the same time still race on object files
 
 ---
 
 ## Testing
 
-`test/` is a standalone console project with 386 assertions.
+`test/` is a standalone console project with 390 assertions.
 
 ```
 cd test
