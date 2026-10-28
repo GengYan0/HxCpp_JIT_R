@@ -1,6 +1,6 @@
 # HxCpp_JIT_R
 
-0.1.10
+0.1.11
 
 Compile and call native C++ while your application is running. Hand it a source string, get a module back, call its functions like any Haxe method.
 
@@ -13,6 +13,7 @@ Behind the call the source goes into a cache directory, is compiled into a share
 
 - Runtime compilation of C++ source into a `.dll` / `.so`, then load and call it
 - The host platform is detected at run time, so a bare `-cpp` project works without defining `windows` or `linux`
+- The console suite runs on Windows with MSVC and on Linux with g++, both in CI
 - Flat C ABI: compiled code includes no hxcpp headers, only a small C header
 - Automatic signature scanning: plain C++ functions are callable without writing macros
 - `const char*` and `std::string` parameters over a dedicated UTF-8 slot table
@@ -823,7 +824,7 @@ Time goes into compiler process startup and linking, not into the amount of code
 
 ## Testing
 
-`test/` is a standalone console project with 396 assertions.
+`test/` is a standalone console project with 397 assertions.
 
 `example/` is a two file project that compiles a module and calls it:
 
