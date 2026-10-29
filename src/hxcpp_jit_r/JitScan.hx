@@ -54,7 +54,9 @@ class JitScan {
     return [
     "int", "unsigned", "long", "short", "char", "bool", "float", "double", "size_t",
     "int8_t", "int16_t", "int32_t", "int64_t", "uint8_t", "uint16_t", "uint32_t", "uint64_t",
-      "intptr_t", "uintptr_t", "ptrdiff_t", "unsigned long", "signed int", "unsigned int"
+      "intptr_t", "uintptr_t", "ptrdiff_t", "unsigned long", "signed int", "unsigned int",
+      "long long", "unsigned long long", "long int", "unsigned long int", "signed char",
+      "unsigned char", "short int", "unsigned short", "signed long", "signed long long"
     ];
   }
 
@@ -106,6 +108,23 @@ class JitScan {
         inBlock = true;
         i += 2;
         continue;
+      }
+      if (c == 82 && d == 34) {
+        var lp = i + 2;
+        var lim = i + 18 < n ? i + 18 : n;
+        while (lp < lim && src.charCodeAt(lp) != 40) lp++;
+        if (lp < lim && src.charCodeAt(lp) == 40) {
+          var close = ")" + src.substring(i + 2, lp) + '"';
+          var e = src.indexOf(close, lp + 1);
+          var stop = e < 0 ? n : e + close.length;
+          var k = i;
+          while (k < stop) {
+            b.addChar(src.charCodeAt(k));
+            k++;
+          }
+          i = stop;
+          continue;
+        }
       }
       if (c == 34) {
         inStr = c;
@@ -207,6 +226,51 @@ class JitScan {
     return out;
   }
 
+  static function scopeBlocked(lines:Array<String>):Array<Bool> {
+    var out:Array<Bool> = [];
+    var stack:Array<Bool> = [];
+    for (line in lines) {
+      var bad = false;
+      for (v in stack) if (v) {
+        bad = true;
+        break;
+      }
+      out.push(bad);
+      var segStart = 0;
+      for (j in 0...line.length) {
+        var ch = line.charCodeAt(j);
+        if (ch == 123) {
+          stack.push(!transparentScope(StringTools.trim(line.substring(segStart, j))));
+          segStart = j + 1;
+        } else if (ch == 125) {
+          if (stack.length > 0) stack.pop();
+          segStart = j + 1;
+        } else if (ch == 59) segStart = j + 1;
+      }
+    }
+    return out;
+  }
+
+  static function transparentScope(pre:String):Bool {
+    if (pre == "") return false;
+    if (StringTools.startsWith(pre, "namespace")) return true;
+    if (StringTools.startsWith(pre, "extern")) return true;
+    return false;
+  }
+
+  static function braceOnNextLine(lines:Array<String>, li:Int):Bool {
+    var k = li + 1;
+    while (k < lines.length) {
+      var t = StringTools.trim(lines[k]);
+      if (t == "") {
+        k++;
+        continue;
+      }
+      return t.charAt(0) == "{";
+    }
+    return false;
+  }
+
   public static function functions(src:String, structs:Array<JitStructInfo> = null):Array<JitFnInfo> {
     var clean = strip(src);
     var kw = keywords();
@@ -215,14 +279,13 @@ class JitScan {
     if (structs != null) for (st in structs) sts.set(st.name, true);
     var out:Array<JitFnInfo> = [];
     var lines = clean.split("\n");
+    var blocked = scopeBlocked(lines);
     for (li in 0...lines.length) {
-      var line = lines[li];
-      var head = line.substr(0, line.length - StringTools.ltrim(line).length);
-      if (head.length > 0 && head.indexOf("\t") < 0 && head.length > 2) continue;
-      var s = StringTools.trim(line);
+      if (blocked[li]) continue;
+      var s = StringTools.trim(lines[li]);
       if (s == "" || s.charAt(0) == "#") continue;
       if (s.indexOf("(") < 0 || s.indexOf(")") < 0) continue;
-      if (s.indexOf("{") < 0) continue;
+      if (s.indexOf("{") < 0 && !braceOnNextLine(lines, li)) continue;
       var p = s.indexOf("(");
       var q = p + 1;
       var dep = 1;
@@ -256,30 +319,30 @@ class JitScan {
       var args:Array<String> = [];
       var ok = true;
       var strArgs = 0;
+      var writeBack = 0;
       for (t in rawArgs) {
         var c = code(t);
         if (c == "R" && t.indexOf("const") < 0) c = "W";
         if (c == "?") {
-          var raw0 = StringTools.trim(t);
-          var bare = raw0;
-          while (StringTools.endsWith(bare, "&")) bare = StringTools.trim(bare.substr(0, bare.length - 1));
-          var base = trimQualifiers(bare);
-          if (sts.exists(base)) c = "t";
-          else if (bare != raw0 && isNumeric(base, nums)) c = "r";
+          var bare = valueType(t);
+          if (sts.exists(bare)) c = "t";
+          else if (StringTools.endsWith(StringTools.trim(t), "&") && isNumeric(bare, nums)) c = "r";
         }
         if (c == "?") {
           ok = false;
           break;
         }
         if (c == "s" || c == "S") strArgs++;
+        if (c == "W") writeBack++;
         args.push(c);
       }
       if (args.length > 6) ok = false;
       if (args.length - strArgs > 6) ok = false;
       if (strArgs > 4) ok = false;
+      if (writeBack > 2) ok = false;
       var rc = code(ret);
       if (rc == "v" && !isVoid(ret)) ok = false;
-      if (rc == "?" && sts.exists(trimQualifiers(ret))) rc = "t";
+      if (rc == "?" && sts.exists(valueType(ret))) rc = "t";
       if (rc == "?") ok = false;
       if (rc == "S" || rc == "R") ok = false;
       var sig = rc + "(" + args.join("") + ")";
@@ -431,6 +494,12 @@ class JitScan {
       }
     }
     return StringTools.trim(out);
+  }
+
+  static function valueType(t:String):String {
+    var s = StringTools.trim(t);
+    while (StringTools.endsWith(s, "&")) s = StringTools.trim(s.substr(0, s.length - 1));
+    return trimQualifiers(s);
   }
 
   static function isNumeric(t:String, nums:Array<String>):Bool {
