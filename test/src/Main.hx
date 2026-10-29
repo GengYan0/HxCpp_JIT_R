@@ -406,8 +406,12 @@ int ids[3];
     eq("agg survived recompile", Std.string(as.call("total")), "10");
     as.dispose();
 
-    head("manual loader");
-    var manSrc = "int sq(int x) { return x * x; }\nint add3(int a, int b, int c) { return a + b + c; }\ndouble half(double v) { return v / 2; }\n";
+    head("module init failure");
+    var ifm = Jit.compile("initfail", "RJIT_INIT { return 7; }\n");
+    ok("non zero rjit_init fails the module", !ifm.ok, ifm.diag.length > 0 ? JitCompiler.describe(ifm.diag[0]) : "");
+    eq("init failure code", ifm.diag.length > 0 ? ifm.diag[0].code : "", "E_INIT");
+
+    head("manual loader");    var manSrc = "int sq(int x) { return x * x; }\nint add3(int a, int b, int c) { return a + b + c; }\ndouble half(double v) { return v / 2; }\n";
     var mp = Jit.compile("man", manSrc, {loader: "manual"});
     ok("manual compile+load", mp.ok, mp.diag.length > 0 ? JitCompiler.describe(mp.diag[0]) : "");
     if (mp.ok && mp.image != null) {
@@ -691,6 +695,25 @@ void bump(Vec2& v) { v.x = v.x + 10; }
     eq("const reference parameter", Std.string(bv.callAuto("len3", [bv.get("&gv")])), "13");
     ok("mutable reference parameter", bv.callAuto("bump", [bv.get("&gv")]) == 0 && bv.get("gv.x") == 13, "");
 
+    head("struct result ownership");
+    var so = Jit.compile("strowner", '
+struct Pair { double a; double b; };
+Pair gp;
+Pair mk(double x, double y) { Pair p; p.a = x; p.b = y; return p; }
+const Pair& peek() { gp.a = 3; gp.b = 4; return gp; }
+int twostr(std::string in, std::string& x, std::string& y) { x = in + "1"; y = in + "2"; return 1; }
+auto aff(int v) { return v; }
+');
+    ok("struct owner module", so.ok, so.diag.length > 0 ? JitCompiler.describe(so.diag[0]) : "");
+    var keep = so.callStruct("mk", [1, 2]);
+    for (i in 0...12) so.callStruct("mk", [i + 10.0, i + 20.0]);
+    eq("struct result survives later calls", Std.string(keep.readF64(0)), "1");
+    eq("const reference return", Std.string(so.callStruct("peek", []).readF64(8)), "4");
+    var both = so.callStrBoth("twostr", [], ["x"]);
+    eq("first write back", both.a, "x1");
+    eq("second write back", both.b, "x2");
+    ok("auto function reported as skipped", so.skipped.indexOf("aff") >= 0, so.skipped.join(","));
+
     head("references and string members");
     var rf = Jit.compile("refs", '
 struct Rec { std::string name; double score; };
@@ -929,6 +952,12 @@ double alive() { return counter + hits[1]; }
     var sgv = JitScan.globals("std::string names[4];\nint plain;\n");
     eq("array of std::string is skipped", Std.string(sgv.length), "1");
     eq("plain global survives", sgv[0].name, "plain");
+    var wide = JitScan.globals("unsigned long long big;\nlong long swide;\n");
+    eq("long long globals are numeric", [for (v in wide) v.name].join(","), "big,swide");
+    var allman = JitScan.functions("namespace ns {\nint ind(int a)\n{\n  return a;\n}\nclass C {\n  int m(int a) { return a; }\n};\n}\n");
+    eq("allman and namespace scanned", [for (f in allman) f.name].join(","), "ind");
+    var raw = JitScan.functions('const char* s = R"(a"b)";\nint after_raw(double v) { return (int)v; }\n');
+    eq("raw string keeps the scanner in sync", [for (f in raw) f.name].join(","), "after_raw");
 
     head("thread local blocks");
     var seed = haxe.io.Bytes.alloc(8);
@@ -1138,6 +1167,8 @@ double read() { return got; }
     ok("a host that does not pump lets the call time out", waited >= 20 && waited < 1500, Jit.f3(waited) + "ms");
     eq("the timed out callback returned zero", Std.string(tj.callAuto("read", [])), "0");
     eq("the timed out callback never ran", Std.string(seen), Std.string(before));
+    Jit.tick();
+    ok("the timeout is reported", JitHost.lastError.indexOf("timed out") >= 0, JitHost.lastError);
     Jit.threadTimeout = 2000;
 
     head("throughput");
