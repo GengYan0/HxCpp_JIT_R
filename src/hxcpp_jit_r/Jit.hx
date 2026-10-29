@@ -408,7 +408,7 @@ class Jit {
   public static var maxEvalModules:Int = 16;
 
   public static function eval(code:String, ?o:JitOptions):Float {
-    var n = "eval_" + JitCache.key(code, "").substr(0, 8);
+    var n = "eval_" + JitCache.key(code, "");
     var oo:JitOptions = {
       opt: o == null ? null : o.opt,
       std: o == null ? null : o.std,
@@ -530,13 +530,21 @@ class Jit {
   }
 
   static var timeoutsSeen:Int = 0;
+  static var dropsSeen:Float = 0;
 
   static function reportTimeouts():Void {
     var n = JitNative.jobTimeouts();
-    if (n == timeoutsSeen) return;
-    var missed = n - timeoutsSeen;
-    timeoutsSeen = n;
-    JitHost.error("callback", JitNative.jobTimeoutName(), missed + " queued call(s) timed out, the host did not pump");
+    if (n != timeoutsSeen) {
+      var missed = n - timeoutsSeen;
+      timeoutsSeen = n;
+      JitHost.error("callback", JitNative.jobTimeoutName(), missed + " queued call(s) timed out, the host did not pump");
+    }
+    var d = JitNative.jobDrops();
+    if (d != dropsSeen) {
+      var lost = d - dropsSeen;
+      dropsSeen = d;
+      JitHost.error("callback", JitNative.jobDropName(), Std.int(lost) + " queued call(s) found no free slot, the host did not pump in time");
+    }
   }
 
   public static function tick():Void {

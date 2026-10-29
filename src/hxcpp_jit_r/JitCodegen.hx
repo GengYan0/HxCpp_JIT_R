@@ -13,7 +13,7 @@ typedef JitLeaf = {
 }
 
 class JitCodegen {
-  public static inline var BUILD:Int = 30;
+  public static inline var BUILD:Int = 31;
   public static inline var MAX_DEPTH:Int = 3;
 
   public static function emit(fns:Array<JitFnInfo>, vars:Array<JitVarInfo>, extra:Array<String> = null, structs:Array<JitStructInfo> = null, externs:Array<String> = null):String {
@@ -65,6 +65,7 @@ class JitCodegen {
       } else if (!sigs.exists(f.sig)) {
         sigs.set(f.sig, true);
         b.add(dispatcher(f.sig));
+        if (f.sig.indexOf("l") >= 0) b.add(dispatcher(f.sig, true));
       }
     }
 
@@ -233,7 +234,13 @@ class JitCodegen {
     return "rjit_disp_" + ret + "_" + args;
   }
 
-  public static function dispatcher(sig:String):String {
+  public static function wideDispName(sig:String):String {
+    var p = sig.indexOf("(");
+    if (p < 0) return "";
+    return "rjit_dw_" + sig.substr(0, p) + "_" + sig.substr(p + 1, sig.length - p - 2);
+  }
+
+  public static function dispatcher(sig:String, wide:Bool = false):String {
     var p = sig.indexOf("(");
     var ret = sig.substr(0, p);
     var argSigs = sig.substr(p + 1, sig.length - p - 2);
@@ -245,17 +252,19 @@ class JitCodegen {
       var c = argSigs.charAt(i);
       types.push(cppType(c));
       if (c == "s" || c == "S") {
-        expr.push(argExpr(c, strSlot));
+        expr.push(argExpr(c, strSlot, "a", wide));
         strSlot++;
       } else {
-        expr.push(argExpr(c, numSlot));
+        expr.push(argExpr(c, numSlot, "a", wide));
         numSlot++;
       }
     }
-    var name = dispName(sig);
+    var name = wide ? wideDispName(sig) : dispName(sig);
     var fnty = retType(ret) + "(*)(" + types.join(",") + ")";
     var body = "((" + fnty + ")f)(" + expr.join(", ") + ")";
-    var call = ret == "v" ? body + "; return 0.0;" : "return " + retCast(ret) + body + ";";
+    var call = ret == "v"
+      ? body + "; return 0.0;"
+      : (wide && (ret == "l" || ret == "u") ? "return rjit_i64_bits(" + body + ");" : "return " + retCast(ret) + body + ";");
     return 'extern "C" RJIT_API double ' + name + '(RJitCtx* ctx, void* f, RJitArgs* a) { try { ' + call + ' } catch (const std::exception& e) { RJIT_ERRN(e.what(), (int)strlen(e.what())); return rjit_nan_val(); } catch (...) { return rjit_nan_val(); } }' + "\n";
   }
 
@@ -452,7 +461,7 @@ class JitCodegen {
     };
   }
 
-  static function argExpr(c:String, i:Int, p:String = "a"):String {
+  static function argExpr(c:String, i:Int, p:String = "a", wide:Bool = false):String {
     var raw = p + "->a[" + i + "]";
     var sp = p + "->s[" + i + "]";
     return switch (c) {
@@ -462,7 +471,7 @@ class JitCodegen {
       case "h": "(short)" + raw;
       case "i": "(int)" + raw;
       case "u": "(unsigned int)" + raw;
-      case "l": "(long long)" + raw;
+      case "l": wide ? "rjit_bits_i64(" + raw + ")" : "(long long)" + raw;
       case "p": "(void*)(size_t)" + raw;
       case "s": "(" + sp + " != 0 ? " + sp + " : \"\")";
       case "S": "std::string(" + sp + " != 0 ? " + sp + " : \"\", " + sp + " != 0 ? (size_t)" + p + "->sl[" + i + "] : (size_t)0)";

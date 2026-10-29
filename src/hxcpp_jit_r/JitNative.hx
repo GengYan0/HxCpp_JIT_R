@@ -311,6 +311,9 @@ static char rjit_timeout_name[128] = {0};
 static std::thread::id rjit_host_tid;
 static std::atomic<bool> rjit_host_set(false);
 static std::atomic<int> rjit_wait_ms(2000);
+static std::atomic<long long> rjit_job_drops(0);
+static char rjit_drop_name[128];
+static std::atomic<int> rjit_drop_len(0);
 
 extern "C" RJIT_HOST_EXPORT void rjit_set_host_thread(void) {
   rjit_host_tid = std::this_thread::get_id();
@@ -345,7 +348,14 @@ static double rjit_queue(void* m, const char* n, int len, double a0, double a1, 
       break;
     }
   }
-  if (idx < 0) return 0.0;
+  if (idx < 0) {
+    int dl = len > 127 ? 127 : (len < 0 ? 0 : len);
+    if (dl > 0 && n != 0) memcpy(rjit_drop_name, n, (size_t)dl);
+    rjit_drop_name[dl] = 0;
+    rjit_drop_len.store(dl);
+    rjit_job_drops.fetch_add(1);
+    return 0.0;
+  }
   RJitJob& j = rjit_jobs[idx];
   j.active = true;
   j.taken = false;
@@ -967,6 +977,34 @@ class JitNative {
 
   @:functionCode('return (size_t)&rjit_tls_get;')
   public static function tlsAddr():cpp.SizeT return 0;
+
+  @:functionCode('
+    long long v = ((long long)(unsigned long long)(unsigned int)hi << 32) | (unsigned long long)(unsigned int)lo;
+    double d = 0.0;
+    memcpy(&d, &v, 8);
+    return d;
+  ')
+  public static function bitsOf64(lo:Int, hi:Int):Float return 0;
+
+  @:functionCode('
+    long long v = 0;
+    memcpy(&v, &v0, 8);
+    return (int)(unsigned int)((unsigned long long)v >> 32);
+  ')
+  public static function hiOf64(v0:Float):Int return 0;
+
+  @:functionCode('
+    long long v = 0;
+    memcpy(&v, &v0, 8);
+    return (int)(unsigned int)v;
+  ')
+  public static function loOf64(v0:Float):Int return 0;
+
+  @:functionCode('return (double)rjit_job_drops.load();')
+  public static function jobDrops():Float return 0;
+
+  @:functionCode('int n = rjit_drop_len.load(); return n > 0 ? ::String::create(rjit_drop_name, n) : ::String("");')
+  public static function jobDropName():String return "";
 
   @:functionCode('return (int)rjit_tls_register((size_t)size, (const void*)(size_t)init, (size_t)initSize);')
   public static function tlsRegister(size:Int, init:cpp.SizeT, initSize:Int):Int return 0;

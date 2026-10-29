@@ -729,6 +729,40 @@ class JitModule {
     return guard(r, "callAuto", n);
   }
 
+  public function callWide(n:String, wide:Array<haxe.Int64>, ?nums:Array<Float>, ?strs:Array<String>):haxe.Int64 {
+    var ws:Array<haxe.Int64> = wide == null ? [] : wide;
+    var ns:Array<Float> = nums == null ? [] : nums;
+    var f = pick(n, ws.length + ns.length, strs == null ? 0 : strs.length);
+    if (f == null) f = fns.get(n);
+    if (f == null || !f.callable || handle == 0) return haxe.Int64.ofInt(0);
+    var fp = ptrOf(n, f.sig);
+    if (fp == 0) fp = resolve("rjit_ptr_" + n);
+    var d = resolve(JitCodegen.wideDispName(f.sig));
+    if (fp == 0 || d == 0) return haxe.Int64.ofInt(0);
+    var slots:Array<Float> = [];
+    var wi = 0;
+    var ni = 0;
+    for (c in f.args) {
+      if (c == "s" || c == "S") continue;
+      if (c == "l") {
+        var v = wi < ws.length ? ws[wi] : haxe.Int64.ofInt(0);
+        wi++;
+        slots.push(JitNative.bitsOf64(v.low, v.high));
+      } else {
+        slots.push(ni < ns.length ? ns[ni] : 0.0);
+        ni++;
+      }
+    }
+    calls++;
+    var r = usesStr(f.sig)
+      ? JitNative.callViaB(d, fp, ctx, slots.length, a(slots, 0), a(slots, 1), a(slots, 2), a(slots, 3), a(slots, 4), a(slots, 5),
+          bytesOf(strs, 0), bytesOf(strs, 1), bytesOf(strs, 2), bytesOf(strs, 3))
+      : JitNative.callVia(d, fp, ctx, slots.length, a(slots, 0), a(slots, 1), a(slots, 2), a(slots, 3), a(slots, 4), a(slots, 5));
+    if (r != r) return haxe.Int64.ofInt(0);
+    if (f.ret == "l") return haxe.Int64.make(JitNative.hiOf64(r), JitNative.loOf64(r));
+    return haxe.Int64.ofInt(Std.int(r));
+  }
+
   public static inline function usesStr(sig:String):Bool {
     return sig.indexOf("s") >= 0 || sig.indexOf("S") >= 0 || sig.indexOf("R") >= 0 || sig.indexOf("W") >= 0;
   }
