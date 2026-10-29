@@ -88,8 +88,8 @@ static void rjit_sig_handler(int sig, siginfo_t* si, void* uc) {
 static void rjit_hook(void) {
   static std::once_flag once;
   std::call_once(once, [] {
-    static const int sigs[4] = {SIGSEGV, SIGBUS, SIGFPE, SIGILL};
-    for (int i = 0; i < 4; i++) {
+    static const int sigs[5] = {SIGSEGV, SIGBUS, SIGFPE, SIGILL, SIGABRT};
+    for (int i = 0; i < 5; i++) {
       struct sigaction sa;
       memset(&sa, 0, sizeof(sa));
       sa.sa_sigaction = rjit_sig_handler;
@@ -305,6 +305,9 @@ static RJitJob rjit_jobs[RJIT_JOB_MAX];
 static unsigned rjit_job_seq = 0;
 static std::mutex rjit_job_mu;
 static std::condition_variable rjit_job_done;
+static std::atomic<unsigned> rjit_job_timeouts(0);
+static std::mutex rjit_timeout_mu;
+static char rjit_timeout_name[128] = {0};
 static std::thread::id rjit_host_tid;
 static std::atomic<bool> rjit_host_set(false);
 static std::atomic<int> rjit_wait_ms(2000);
@@ -316,6 +319,17 @@ extern "C" RJIT_HOST_EXPORT void rjit_set_host_thread(void) {
 
 extern "C" RJIT_HOST_EXPORT void rjit_set_wait(int ms) {
   rjit_wait_ms.store(ms < 1 ? 1 : ms);
+}
+
+extern "C" RJIT_HOST_EXPORT int rjit_job_timeouts_total(void) {
+  return (int)rjit_job_timeouts.load();
+}
+
+extern "C" RJIT_HOST_EXPORT const char* rjit_job_timeout_last(void) {
+  static thread_local std::string held;
+  std::lock_guard<std::mutex> tl(rjit_timeout_mu);
+  held.assign(rjit_timeout_name);
+  return held.c_str();
 }
 
 static bool rjit_on_host(void) {
@@ -353,6 +367,11 @@ static double rjit_queue(void* m, const char* n, int len, double a0, double a1, 
   unsigned mine = ++rjit_job_seq;
   j.seq = mine;
   bool ok = rjit_job_done.wait_for(lk, std::chrono::milliseconds(rjit_wait_ms.load()), [&] { return j.done && j.seq == mine; });
+  if (!ok) {
+    rjit_job_timeouts.fetch_add(1);
+    std::lock_guard<std::mutex> tl(rjit_timeout_mu);
+    memcpy(rjit_timeout_name, j.name, (size_t)j.len + 1);
+  }
   double r = 0.0;
   if (ok) {
     r = j.result;
@@ -928,6 +947,9 @@ class JitNative {
   @:functionCode('((void(*)(void*,void*))(size_t)fn)((void*)(size_t)a, (void*)(size_t)b); return 0.0;')
   public static function callVoid2(fn:cpp.SizeT, a:cpp.SizeT, b:cpp.SizeT):Float return 0;
 
+  @:functionCode('return ((int(*)(void*))(size_t)f)((void*)(size_t)a0);')
+  public static function callInt1(f:cpp.SizeT, a0:cpp.SizeT):Int return 0;
+
   @:functionCode('rjit_set_host_thread(); return 0.0;')
   public static function setHostThread():Float return 0;
 
@@ -936,6 +958,12 @@ class JitNative {
 
   @:functionCode('rjit_pump(); return 0.0;')
   public static function pump():Float return 0;
+
+  @:functionCode('return rjit_job_timeouts_total();')
+  public static function jobTimeouts():Int return 0;
+
+  @:functionCode('const char* s = rjit_job_timeout_last(); return s == 0 ? ::String("") : ::String(s);')
+  public static function jobTimeoutName():String return "";
 
   @:functionCode('return (size_t)&rjit_tls_get;')
   public static function tlsAddr():cpp.SizeT return 0;
