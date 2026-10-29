@@ -1088,6 +1088,28 @@ double apply2(int (*f)(int), double v) { return (double)f((int)v); }
     ok("string callback built", fsp != 0, "");
     eq("string callback text", Std.string(cstr.callAuto("slen", [fsp, 3])), "4");
 
+    head("string termination");
+    var nz = Jit.compile("cstrnul", '
+int nlen(const char* s) { int n = 0; while (s[n]) n++; return n; }
+int ntail(const char* s, int i) { return (int)(unsigned char)s[i]; }
+int nstd(const std::string& s) { return (int)s.size(); }
+');
+    ok("nul module compiles", nz.ok, nz.diag.length > 0 ? JitCompiler.describe(nz.diag[0]) : "");
+    eq("a char argument is nul terminated", Std.string(nz.callAuto("nlen", [], ["abc"])), "3");
+    eq("the byte after the text is zero", Std.string(nz.callAuto("ntail", [3], ["abc"])), "0");
+    eq("utf8 text keeps its length", Std.string(nz.callAuto("nlen", [], ["caf\u00e9"])), "5");
+    eq("the byte after utf8 text is zero", Std.string(nz.callAuto("ntail", [5], ["caf\u00e9"])), "0");
+    eq("the terminator is not part of a std::string", Std.string(nz.callAuto("nstd", [], ["caf\u00e9"])), "5");
+
+    head("pointer callback");
+    var pm = Jit.compile("cbptr", 'double passptr(const void* p, double (*f)(const void*)) { return f(p); }');
+    ok("pointer callback host compiles", pm.ok, pm.diag.length > 0 ? JitCompiler.describe(pm.diag[0]) : "");
+    Jit.bind("passptr", function(a0:Float, a1:Float, a2:Float, a3:Float):Float return a0);
+    var pp = Jit.callback("passptr", "d(p)");
+    ok("pointer callback built", pp != 0, "");
+    var paddr = pm.address("passptr");
+    eq("a pointer survives the callback channel", Std.string(pm.callAuto("passptr", [paddr, pp]) == paddr), "true");
+
     var stub = "";
     for (mod in Jit.all()) if (StringTools.startsWith(mod.name, "rjitcb_label_")) stub = mod.name;
     ok("stub module is visible", stub != "", "");
@@ -1103,6 +1125,14 @@ double apply2(int (*f)(int), double v) { return (double)f((int)v); }
     JitHost.lastError = "";
     eq("unbound callback returns zero", Std.string(gcb.callAuto("callghost", [gp, 1])), "0");
     ok("unbound callback is reported", JitHost.lastError.indexOf("nothing is bound") >= 0, JitHost.lastError);
+
+    var mm = Jit.compile("cbmiss", 'RJIT(go) { return RJIT_CALL1("nobody", 1.0); }');
+    ok("missing call module compiles", mm.ok, mm.diag.length > 0 ? JitCompiler.describe(mm.diag[0]) : "");
+    mm.call("go");
+    var mid = mm.id + "|";
+    eq("the missing binding is recorded", Std.string([for (k in JitHost.missed()) if (StringTools.startsWith(k, mid)) k].length), "1");
+    Jit.dispose("cbmiss");
+    eq("the record goes away with its module", Std.string([for (k in JitHost.missed()) if (StringTools.startsWith(k, mid)) k].length), "0");
 
     head("lifecycle and threads");
     var lm = Jit.compile("lifecycle", 'int one() { return 1; }');

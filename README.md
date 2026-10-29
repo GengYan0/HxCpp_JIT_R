@@ -1,6 +1,6 @@
 # HxCpp_JIT_R
 
-0.1.21
+0.1.22
 
 Compile and call native C++ while your application is running. Hand it a source string, get a module back, call its functions like any Haxe method.
 
@@ -290,6 +290,8 @@ m.callAuto("length", [], ["caf\u00e9"]);   // 5, UTF-8 bytes
 m.callAuto("joined", [], ["abc", "de"]);  // 5
 m.callAuto("head", [], ["A"]);            // 65
 ```
+
+A `const char*` argument points at a copy with a zero byte after the text, so `strlen` on it is safe. A `std::string` argument carries its own length and keeps the zero byte out of the value.
 
 A function that returns `std::string` is called the same way and read with `callStr`:
 
@@ -643,7 +645,9 @@ RJIT(emit) {
 ');
 ```
 
-A stub that a native function can call back through is built from a shape: `d(d)` takes one number and returns one, `v()` returns nothing, `s(d)` returns text.
+A stub that a native function can call back through is built from a shape: `d(d)` takes one number and returns one, `v()` returns nothing, `s(d)` returns text. The letters are `d`, `i`, `f`, `p` for an argument and `d`, `i`, `f`, `s`, `v` for a return; up to four arguments.
+
+A `p` argument arrives in the host as a number, because the channel between the stub and the host is four doubles. The value is exact while the address fits 53 bits, which every current 47 and 48 bit user address space does. A pointer above that cannot be carried and is not detected.
 
 ```haxe
 Jit.bind("label", (a, b, c, d) -> "len" + Std.int(a));
@@ -655,7 +659,7 @@ Jit.compile("cbstr", 'int slen(const char* (*f)(double), double v) { const char*
 
 The text a string callback returns belongs to the host and stays valid until the next call to that callback.
 
-A stub is compiled into a module named `rjitcb_<name>_<shape>`. Native code keeps the pointer, so that module is not unloaded when it leaves the module table: `Jit.dispose` on it frees the context and keeps the code mapped, and `Jit.callback` returns the same address for the same name and shape. A callback whose name has nothing bound under it returns zero and reports it once through `JitHost.error`.
+A stub is compiled into a module named `rjitcb_<name>_<shape>`. Native code keeps the pointer, so that module is not unloaded when it leaves the module table: `Jit.dispose` on it frees the context and keeps the code mapped, and `Jit.callback` returns the same address for the same name and shape. One image per distinct name and shape stays mapped for the process, so a name taken from a counter costs one image each. A callback whose name has nothing bound under it returns zero and reports it once through `JitHost.error`.
 
 ### Session
 
@@ -827,6 +831,8 @@ Time goes into compiler process startup and linking, not into the amount of code
 - Up to six numeric and four string arguments per call
 - Return values are numeric or `void`; pointers come back as addresses and `std::string` results go through `callStr`
 - A function returning `std::string` by reference is listed in `module.skipped`; return by value instead
+- A template function, or one whose return type is `auto`, is also listed in `module.skipped`; the type system cannot call it
+- `JitNative.peek` and `JitNative.poke` take any address and no check stands between them and the process 
 - A guard that fires abandons the faulting frame without unwinding it, so a module that faulted is not repaired; reload it
 - A callback stub keeps its image mapped for the process, because native code holds its address
 - Struct results arrive as an owned copy; the raw address `callAuto` returns stays readable for eight further struct results
@@ -853,7 +859,7 @@ Time goes into compiler process startup and linking, not into the amount of code
 
 ## Testing
 
-`test/` is a standalone console project with 445 assertions.
+`test/` is a standalone console project with 457 assertions.
 
 `example/` is a two file project that compiles a module and calls it:
 
