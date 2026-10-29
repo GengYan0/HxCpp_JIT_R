@@ -7,6 +7,7 @@ class JitHost {
   static var rets:Map<Int, String> = new Map();
   static var ret2:Map<Int, String> = new Map();
   static var vars:Map<String, Float> = new Map();
+  static var misses:Map<String, Bool> = new Map();
 
   public static var logger:String->Void = null;
   public static var onError:Null<(String, String, String) -> Void> = null;
@@ -123,6 +124,9 @@ class JitHost {
   public static function onCallStr(id:Int, name:String, a0:Float, a1:Float, a2:Float, a3:Float):String {
     var f = sync(function() return binds.get(name));
     if (f != null) return Std.string(Reflect.callMethod(null, f, [a0, a1, a2, a3]));
+    var m = sync(function() return mods.get(id));
+    if (m != null && m.has(name)) return Std.string(m.callA(name, [a0, a1, a2, a3]));
+    miss(id, name);
     return "";
   }
 
@@ -131,6 +135,17 @@ class JitHost {
     if (f != null) return cast Reflect.callMethod(null, f, [a0, a1, a2, a3]);
     var m = sync(function() return mods.get(id));
     if (m != null && m.has(name)) return m.callA(name, [a0, a1, a2, a3]);
+    miss(id, name);
     return 0.0;
+  }
+
+  static function miss(id:Int, name:String):Void {
+    var k = id + "|" + name;
+    var first = sync(function() {
+      if (misses.exists(k)) return false;
+      misses.set(k, true);
+      return true;
+    });
+    if (first) error("callback", name, "nothing is bound under this name, calls return zero");
   }
 }

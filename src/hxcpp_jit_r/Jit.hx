@@ -349,7 +349,10 @@ class Jit {
     var bind = m.resolve("rjit_cb_bind");
     if (bind != 0) JitNative.callVoid2(bind, JitNative.hostCall(), JitNative.hostStr());
     var a = JitNative.toFloat(m.resolve("rjit_cb"));
-    if (a != 0) cbCache.set(key, a);
+    if (a != 0) {
+      m.pinned = true;
+      cbCache.set(key, a);
+    }
     return a;
   }
 
@@ -438,7 +441,6 @@ class Jit {
     if (m == null) return;
     mods.remove(name);
     m.dispose();
-    if (StringTools.startsWith(name, "rjitcb_")) cbCache.clear();
   }
 
   public static function disposeAll():Void {

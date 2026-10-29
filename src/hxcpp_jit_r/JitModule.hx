@@ -27,6 +27,7 @@ class JitModule {
   public var ok:Bool = false;
   public var ms:Float = 0.0;
   public var cached:Bool = false;
+  public var pinned:Bool = false;
   public var calls:Int = 0;
   public var image:JitImage = null;
   public var extraSources:Array<String> = null;
@@ -996,7 +997,11 @@ class JitModule {
       ctx = 0;
       return;
     }
-    Jit.retire(handle, image, ctx);
+    if (pinned) {
+      if (ctx != 0) JitNative.freeCtx(ctx);
+    } else {
+      Jit.retire(handle, image, ctx);
+    }
     image = null;
     handle = 0;
     ctx = 0;
