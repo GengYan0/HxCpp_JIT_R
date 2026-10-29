@@ -63,7 +63,7 @@ class Jit {
   static var defaultStd:String = "c++17";
   static var defaultFlags:Array<String> = [];
   static var defaultLoader:String = "loadlib";
-  static var watched:Array<{path:String, name:String, sig:String, cb:Null<JitModule->Void>}> = [];
+  static var watched:Array<{path:String, name:String, sig:String, cb:Null<JitModule->Void>, mt:Float, sz:Int}> = [];
   public static var watchEvery:Int = 30;
   public static var threadTimeout(default, set):Int = 2000;
 
@@ -273,7 +273,7 @@ class Jit {
     JitHost.add(m);
     if (verbose) {
       var tag = m.cached ? "cached" : Std.int(m.ms) + "ms";
-      Sys.println('[jit] $name ok ($tag)' + (m.symbols.length > 0 ? " " + m.symbols.toString() : ""));
+      Sys.println('[jit] $name ok ($tag)' + (m.symbols.length > 0 ? " " + m.symbols.toString() : "") + (m.skipped.length > 0 ? " skipped: " + m.skipped.join(",") : ""));
     }
     return m;
   }
@@ -401,6 +401,9 @@ class Jit {
     return compile(name, s, opts);
   }
 
+  static var evalMods:Array<String> = [];
+  public static var maxEvalModules:Int = 16;
+
   public static function eval(code:String, ?o:JitOptions):Float {
     var n = "eval_" + JitCache.key(code, "").substr(0, 8);
     var oo:JitOptions = {
@@ -412,6 +415,11 @@ class Jit {
     };
     var m = compile(n, "RJIT(__e) {\n" + code + "\n}\n", oo);
     if (!m.ok) return Math.NaN;
+    if (evalMods.indexOf(n) < 0) evalMods.push(n);
+    while (evalMods.length > maxEvalModules) {
+      var old = evalMods.shift();
+      if (old != n) dispose(old);
+    }
     return m.call("__e");
   }
 
@@ -453,16 +461,25 @@ class Jit {
     if (!FileSystem.exists(path)) return false;
     var n = name == null ? haxe.io.Path.withoutExtension(haxe.io.Path.withoutDirectory(path)) : name;
     var cur = "";
-    try cur = File.getContent(path) catch (e:Dynamic) return false;
+    var mt:Float = 0;
+    var sz = 0;
+    try {
+      cur = File.getContent(path);
+      var st = FileSystem.stat(path);
+      mt = st.mtime.getTime();
+      sz = st.size;
+    } catch (e:Dynamic) return false;
     for (w in watched) {
       if (w.path == path) {
         w.name = n;
         w.sig = cur;
         w.cb = onReload;
+        w.mt = mt;
+        w.sz = sz;
         return true;
       }
     }
-    watched.push({path: path, name: n, sig: cur, cb: onReload});
+    watched.push({path: path, name: n, sig: cur, cb: onReload, mt: mt, sz: sz});
     if (mods.get(n) == null) compile(n, cur);
     return true;
   }
@@ -483,8 +500,18 @@ class Jit {
 
   static function pollWatch():Void {
     for (w in watched) {
+      var mt:Float = -1;
+      var sz = -1;
+      try {
+        var st = FileSystem.stat(w.path);
+        mt = st.mtime.getTime();
+        sz = st.size;
+      } catch (e:Dynamic) continue;
+      if (mt == w.mt && sz == w.sz && Sys.time() * 1000.0 - mt > 2000.0) continue;
       var src = "";
       try src = File.getContent(w.path) catch (e:Dynamic) continue;
+      w.mt = mt;
+      w.sz = sz;
       if (src == w.sig) continue;
       w.sig = src;
       var opts:JitOptions = {force: true};
@@ -500,8 +527,19 @@ class Jit {
     }
   }
 
+  static var timeoutsSeen:Int = 0;
+
+  static function reportTimeouts():Void {
+    var n = JitNative.jobTimeouts();
+    if (n == timeoutsSeen) return;
+    var missed = n - timeoutsSeen;
+    timeoutsSeen = n;
+    JitHost.error("callback", JitNative.jobTimeoutName(), missed + " queued call(s) timed out, the host did not pump");
+  }
+
   public static function tick():Void {
     JitNative.pump();
+    reportTimeouts();
     frame++;
     tickSweep();
     if (watched.length > 0) {
@@ -633,9 +671,13 @@ class Jit {
     #end
   }
 
-  static function usesExceptions(src:String):Bool {
-    if (src == null) return false;
-    return src.indexOf("throw") >= 0 || src.indexOf("catch") >= 0 || src.indexOf("try {") >= 0;
+  static function usesExceptions(m:JitModule):Bool {
+    if (m == null) return false;
+    for (s in m.allSources()) {
+      if (s == null) continue;
+      if (s.indexOf("throw") >= 0 || s.indexOf("catch") >= 0 || s.indexOf("try {") >= 0 || s.indexOf("try{") >= 0) return true;
+    }
+    return false;
   }
 
   static function sym(image:JitImage, h:cpp.SizeT, n:String):cpp.SizeT {
@@ -646,7 +688,7 @@ class Jit {
     if (debug) log("[jit] load 1 " + dll);
     var h:cpp.SizeT = 0;
     var map = loader == "auto" || loader == "manual";
-    if (map && usesExceptions(m.src)) {
+    if (map && usesExceptions(m)) {
       map = false;
       if (verbose) log("[jit] manual mapping cannot unwind C++ exceptions, using the system loader");
     }
@@ -687,13 +729,19 @@ class Jit {
       m.diag.push(diag("E_CTX", "context allocation failed"));
       return false;
     }
-    m.attach(h, c);
-    m.dll = dll;
     var init = sym(m.image, h, "rjit_init");
     if (init != 0) {
-      var rc = Std.int(JitNative.invoke(init, c, 0, 0, 0, 0, 0, 0, 0));
-      if (rc != 0) m.diag.push(diag("E_INIT", "rjit_init returned " + rc));
+      var rc = JitNative.callInt1(init, c);
+      if (rc != 0) {
+        JitNative.freeCtx(c);
+        if (m.image != null) JitLoader.unload(m.image) else JitNative.unloadDll(h);
+        m.image = null;
+        m.diag.push(diag("E_INIT", "rjit_init returned " + rc));
+        return false;
+      }
     }
+    m.attach(h, c);
+    m.dll = dll;
     if (debug) log("[jit] load 8 ok");
     return true;
   }
