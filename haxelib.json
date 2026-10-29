@@ -4,9 +4,9 @@
   "license": "MIT",
   "tags": ["cpp", "jit", "native", "windows", "msvc", "runtime", "hot-reload"],
   "description": "Compile and call native C++ from a hxcpp application at runtime.",
-  "version": "0.1.18",
+  "version": "0.1.19",
   "classPath": "src",
-  "releasenote": "beta: struct results are owned copies, a callback timeout is reported, and the scanner reads namespaces and allman braces",
+  "releasenote": "beta: the mapped image reports how many code pages it switched to read and execute",
   "contributors": ["GengYan0"],
   "dependencies": {}
 }

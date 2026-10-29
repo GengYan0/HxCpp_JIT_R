@@ -38,6 +38,7 @@ class JitImage {
   public var tlsZero:Int = 0;
   public var relocCount:Int = 0;
   public var rebased:Bool = false;
+  public var codePages:Int = 0;
   public var fnTable:cpp.SizeT = 0;
   public var fnCount:Int = 0;
   public var ok:Bool = false;
@@ -504,7 +505,7 @@ class JitLoader {
       var end = s.va + len;
       var pad = end % 4096;
       if (pad != 0) end += 4096 - pad;
-      JitNative.vprotect(at(img.base, start), end - start, 0x20);
+      if (JitNative.vprotect(at(img.base, start), end - start, 0x20) >= 0) img.codePages++;
     }
   }
 

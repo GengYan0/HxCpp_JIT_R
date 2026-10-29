@@ -424,6 +424,7 @@ int ids[3];
       eq("manual tri", Std.string(top.callAuto("tri", [5])), "15");
       Jit.dispose("man2");
       ok("manual unwind table", !JitPlatform.win || img.fnTable != 0, "entries=" + img.fnCount);
+      ok("mapped code pages are not writable", img.codePages > 0, "pages=" + img.codePages);
       var mth = Jit.compile("manthrow", '#include <stdexcept>
 double boom(double v) { if (v > 0) throw std::runtime_error("mapped"); return v; }
 ', {loader: "manual"});
@@ -954,7 +955,7 @@ double alive() { return counter + hits[1]; }
     eq("plain global survives", sgv[0].name, "plain");
     var wide = JitScan.globals("unsigned long long big;\nlong long swide;\n");
     eq("long long globals are numeric", [for (v in wide) v.name].join(","), "big,swide");
-    var allman = JitScan.functions("namespace ns {\nint ind(int a)\n{\n  return a;\n}\nclass C {\n  int m(int a) { return a; }\n};\n}\n");
+    var allman = JitScan.functions("namespace ns {\n    int ind(int a)\n    {\n        return a;\n    }\nclass C {\n  int m(int a) { return a; }\n};\n}\n");
     eq("allman and namespace scanned", [for (f in allman) f.name].join(","), "ind");
     var raw = JitScan.functions('const char* s = R"(a"b)";\nint after_raw(double v) { return (int)v; }\n');
     eq("raw string keeps the scanner in sync", [for (f in raw) f.name].join(","), "after_raw");

@@ -1,6 +1,6 @@
 # HxCpp_JIT_R
 
-0.1.18
+0.1.19
 
 Compile and call native C++ while your application is running. Hand it a source string, get a module back, call its functions like any Haxe method.
 
@@ -208,6 +208,7 @@ The standard library, inline assembly, SIMD intrinsics and templates all work. T
 | `expr(code)` / `exprStr(code)` | Evaluate a numeric or string expression against live state |
 | `callStruct(name, args):JitPtr` | Call a function that returns a struct, by value or by reference |
 | `skipped` | Scanned names that cannot be called through the type system, such as templates and `auto` returns |
+| `image.codePages` | Executable pages switched to read and execute after the image was mapped |
 | `addrOf(name)` | Address of a variable |
 | `getVar` / `setVar` | Top-level numeric and pointer variables |
 | `getField` / `setField` / `getIndex` / `setIndex` | Explicit access |
@@ -845,7 +846,7 @@ Time goes into compiler process startup and linking, not into the amount of code
 
 ## Testing
 
-`test/` is a standalone console project with 439 assertions.
+`test/` is a standalone console project with 440 assertions.
 
 `example/` is a two file project that compiles a module and calls it:
 
