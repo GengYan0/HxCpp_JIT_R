@@ -8,6 +8,7 @@ import hxcpp_jit_r.JitPtr;
 import hxcpp_jit_r.JitLoader;
 import hxcpp_jit_r.JitPlatform;
 import hxcpp_jit_r.JitScan;
+import sys.FileSystem;
 #if cpp
 import sys.thread.Thread;
 #end
@@ -187,6 +188,13 @@ RJIT(d) { return 4; }
     var src = "RJIT(v) { return 1234; }\n";
     Jit.compile("cachedemo", src);
     var c2 = Jit.compile("cachedemo", src);
+    var lkName = "lockprobe" + Std.int(Math.random() * 100000);
+    Jit.compile(lkName, 'int lp() { return 1; }');
+    var left = [];
+    try {
+      for (f in FileSystem.readDirectory(Jit.cacheDir + "/locks")) if (StringTools.endsWith(f, ".lock")) left.push(f);
+    } catch (e:Dynamic) {}
+    eq("a build leaves no lock behind", left.join(","), "");
     ok("second is cached", c2.cached);
     eq("cached value", Std.string(c2.call("v")), "1234");
 
@@ -261,6 +269,10 @@ unsigned int twiceU(unsigned int v) { return v * 2u; }
     ok("crash module compiled", cm.ok);
     eq("crash returns 0", Std.string(cm.callAuto("boom", [1])), "0");
     eq("onError fired", Std.string(crashMsg), "callAuto/boom");
+    ok("the module is marked after a fault", cm.poisoned, "");
+    JitHost.lastError = "";
+    eq("a poisoned module returns zero", Std.string(cm.callAuto("boom", [1])), "0");
+    ok("a poisoned module asks for a reload", JitHost.lastError.indexOf("faulted earlier") >= 0, JitHost.lastError);
     hxcpp_jit_r.JitHost.onError = null;
 
     head("pointer handle");
@@ -1131,6 +1143,10 @@ long long add64(long long a, long long b) { return a + b; }
 long long big64() { return 9007199254740993LL; }
 unsigned long long mix64(const char* s, unsigned long long seed) { unsigned long long h = seed; for (int i = 0; s[i]; i++) h = h * 1099511628211ULL + (unsigned char)s[i]; return h; }
 long long plain(long long a) { return a; }
+long long withd(long long a, int b = 7) { return a + b; }
+long long wlen(const std::string& s, long long k) { return (long long)s.size() + k; }
+long long ovl(long long a, int b) { return a + b; }
+long long ovl(int a, long long b) { return a * 1000 + b; }
 ');
     ok("wide module compiles", wm.ok, wm.diag.length > 0 ? JitCompiler.describe(wm.diag[0]) : "");
     var wideStr = function(v:haxe.Int64):String return v.high + ":" + v.low;
@@ -1143,6 +1159,18 @@ long long plain(long long a) { return a; }
     var h2 = wideStr(wm.callWide("mix64", [s2], [], ["x"]));
     ok("a wide seed keeps its low bits", h1 != h2, h1 + " vs " + h2);
     eq("the numeric path is unchanged", Std.string(wm.callAuto("plain", [7])), "7");
+    eq("a default fills a wide call", wideStr(wm.callWide("withd", [haxe.Int64.ofInt(5)])), "0:12");
+    eq("a struct argument gets a wide entry", wideStr(wm.callWide("wlen", [haxe.Int64.ofInt(10)], [], ["abcd"])), "0:14");
+    JitHost.lastError = "";
+    var short = wm.callWide("add64", [p53]);
+    eq("a short wide call returns zero", wideStr(short), "0:0");
+    ok("a short wide call is reported", JitHost.lastError.indexOf("no default") >= 0, JitHost.lastError);
+    JitHost.lastError = "";
+    var ambiguous = wm.callWide("ovl", [haxe.Int64.ofInt(5)], [7]);
+    eq("an ambiguous wide call returns zero", wideStr(ambiguous), "0:0");
+    ok("an ambiguous wide call is reported", JitHost.lastError.indexOf("callWideSig") >= 0, JitHost.lastError);
+    eq("wide signature picks the first overload", wideStr(wm.callWideSig("ovl", "l(li)", [haxe.Int64.ofInt(5)], [7])), "0:12");
+    eq("wide signature picks the second overload", wideStr(wm.callWideSig("ovl", "l(il)", [haxe.Int64.ofInt(5)], [7])), "0:7005");
 
     var stub = "";
     for (mod in Jit.all()) if (StringTools.startsWith(mod.name, "rjitcb_label_")) stub = mod.name;
