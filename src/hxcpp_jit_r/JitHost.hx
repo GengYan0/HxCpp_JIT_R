@@ -8,6 +8,8 @@ class JitHost {
   static var ret2:Map<Int, String> = new Map();
   static var vars:Map<String, Float> = new Map();
   static var misses:Map<String, Bool> = new Map();
+  static var missCount:Int = 0;
+  static inline var MISS_LIMIT = 256;
 
   public static var logger:String->Void = null;
   public static var onError:Null<(String, String, String) -> Void> = null;
@@ -38,8 +40,18 @@ class JitHost {
       mods.remove(id);
       rets.remove(id);
       ret2.remove(id);
+      var p = id + "|";
+      var drop = [for (k in misses.keys()) if (StringTools.startsWith(k, p)) k];
+      for (k in drop) {
+        misses.remove(k);
+        missCount--;
+      }
       return true;
     });
+  }
+
+  public static function missed():Array<String> {
+    return sync(function() return [for (k in misses.keys()) k]);
   }
 
   public static function module(id:Int):Null<JitModule> {
@@ -143,7 +155,12 @@ class JitHost {
     var k = id + "|" + name;
     var first = sync(function() {
       if (misses.exists(k)) return false;
+      if (missCount >= MISS_LIMIT) {
+        misses = new Map();
+        missCount = 0;
+      }
       misses.set(k, true);
+      missCount++;
       return true;
     });
     if (first) error("callback", name, "nothing is bound under this name, calls return zero");

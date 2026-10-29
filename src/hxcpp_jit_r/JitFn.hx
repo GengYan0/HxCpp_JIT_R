@@ -76,6 +76,10 @@ class JitFn {
     if (strs == null || i >= strs.length) return null;
     var s = strs[i];
     if (s == null) return null;
-    return haxe.io.Bytes.ofString(s);
+    var u = haxe.io.Bytes.ofString(s);
+    var b = haxe.io.Bytes.alloc(u.length + 1);
+    b.blit(0, u, 0, u.length);
+    b.set(u.length, 0);
+    return b;
   }
 }

@@ -617,7 +617,11 @@ class JitModule {
     if (strs == null || i >= strs.length) return null;
     var s = strs[i];
     if (s == null) return null;
-    return haxe.io.Bytes.ofString(s);
+    var u = haxe.io.Bytes.ofString(s);
+    var b = haxe.io.Bytes.alloc(u.length + 1);
+    b.blit(0, u, 0, u.length);
+    b.set(u.length, 0);
+    return b;
   }
 
   public function pick(n:String, nums:Int, strs:Int):JitFnInfo {
@@ -919,7 +923,7 @@ class JitModule {
       if (info.kind != "sstr") return false;
       var f0 = resolve("rjit_sets_" + p.base);
       if (f0 == 0) return false;
-      return JitNative.invokeB(f0, ctx, 0, 0, 0, 0, 0, 0, 0, haxe.io.Bytes.ofString(val), null, null, null) == 0.0;
+      return JitNative.invokeB(f0, ctx, 0, 0, 0, 0, 0, 0, 0, bytesOf([val], 0), null, null, null) == 0.0;
     }
     var fields:Array<String> = [];
     var idx = -1;
@@ -935,7 +939,7 @@ class JitModule {
     if (fieldType(info.structName, fields) != "S") return false;
     var fnp = resolve((idx >= 0 ? "rjit_setstra_" : "rjit_setstr_") + key);
     if (fnp == 0) return false;
-    var b = haxe.io.Bytes.ofString(val);
+    var b = bytesOf([val], 0);
     var r = idx >= 0
       ? JitNative.invokeB(fnp, ctx, 1, idx, 0, 0, 0, 0, 0, b, null, null, null)
       : JitNative.invokeB(fnp, ctx, 0, 0, 0, 0, 0, 0, 0, b, null, null, null);

@@ -641,10 +641,10 @@ class JitNative {
     const unsigned char* q2 = (b2.mPtr != 0) ? b2->b->Pointer() : 0;
     const unsigned char* q3 = (b3.mPtr != 0) ? b3->b->Pointer() : 0;
     a.sn = 0;
-    if (q0 != 0) { a.s[0] = (const char*)q0; a.sl[0] = b0->length; a.sn = 1; }
-    if (q1 != 0) { a.s[1] = (const char*)q1; a.sl[1] = b1->length; a.sn = 2; }
-    if (q2 != 0) { a.s[2] = (const char*)q2; a.sl[2] = b2->length; a.sn = 3; }
-    if (q3 != 0) { a.s[3] = (const char*)q3; a.sl[3] = b3->length; a.sn = 4; }
+    if (q0 != 0) { a.s[0] = (const char*)q0; a.sl[0] = b0->length > 0 ? b0->length - 1 : 0; a.sn = 1; }
+    if (q1 != 0) { a.s[1] = (const char*)q1; a.sl[1] = b1->length > 0 ? b1->length - 1 : 0; a.sn = 2; }
+    if (q2 != 0) { a.s[2] = (const char*)q2; a.sl[2] = b2->length > 0 ? b2->length - 1 : 0; a.sn = 3; }
+    if (q3 != 0) { a.s[3] = (const char*)q3; a.sl[3] = b3->length > 0 ? b3->length - 1 : 0; a.sn = 4; }
     return rjit_guard2(reinterpret_cast<double(*)(RJitCtx*,RJitArgs*)>(fn), reinterpret_cast<RJitCtx*>(ctx), &a);
   ')
   public static function invokeB(fn:cpp.SizeT, ctx:cpp.SizeT, n:Int, a0:Float, a1:Float, a2:Float, a3:Float, a4:Float, a5:Float,
@@ -706,10 +706,10 @@ class JitNative {
     const unsigned char* q2 = (b2.mPtr != 0) ? b2->b->Pointer() : 0;
     const unsigned char* q3 = (b3.mPtr != 0) ? b3->b->Pointer() : 0;
     a.sn = 0;
-    if (q0 != 0) { a.s[0] = (const char*)q0; a.sl[0] = b0->length; a.sn = 1; }
-    if (q1 != 0) { a.s[1] = (const char*)q1; a.sl[1] = b1->length; a.sn = 2; }
-    if (q2 != 0) { a.s[2] = (const char*)q2; a.sl[2] = b2->length; a.sn = 3; }
-    if (q3 != 0) { a.s[3] = (const char*)q3; a.sl[3] = b3->length; a.sn = 4; }
+    if (q0 != 0) { a.s[0] = (const char*)q0; a.sl[0] = b0->length > 0 ? b0->length - 1 : 0; a.sn = 1; }
+    if (q1 != 0) { a.s[1] = (const char*)q1; a.sl[1] = b1->length > 0 ? b1->length - 1 : 0; a.sn = 2; }
+    if (q2 != 0) { a.s[2] = (const char*)q2; a.sl[2] = b2->length > 0 ? b2->length - 1 : 0; a.sn = 3; }
+    if (q3 != 0) { a.s[3] = (const char*)q3; a.sl[3] = b3->length > 0 ? b3->length - 1 : 0; a.sn = 4; }
     double addr = 0.0;
     addr = rjit_guard2(reinterpret_cast<double(*)(RJitCtx*,RJitArgs*)>(ptrFn), reinterpret_cast<RJitCtx*>(ctx), &a);
     if (addr != addr) return addr;
