@@ -1,6 +1,6 @@
 # HxCpp_JIT_R
 
-0.1.17
+0.1.18
 
 Compile and call native C++ while your application is running. Hand it a source string, get a module back, call its functions like any Haxe method.
 
@@ -155,7 +155,7 @@ m.callAuto("bump", []);
 m.getVar("counter");        // 1
 ```
 
-Scanning is line based: an export or a global starts in column 0 and keeps its whole signature, the default arguments and the opening brace on that one line. Anything indented belongs to a body and is left alone.
+Scanning is line based: an export or a global keeps its whole signature, the default arguments and the opening brace on one line, and the opening brace may also sit on the next line. Functions inside a namespace are found at any indentation; anything inside a class, struct or function body is left alone. A signature the type system cannot express through numbers and strings, such as a template or an `auto` return, is listed in `module.skipped`.
 
 The standard library, inline assembly, SIMD intrinsics and templates all work. The default is `/MT`, so the library carries its own C runtime.
 
@@ -206,7 +206,8 @@ The standard library, inline assembly, SIMD intrinsics and templates all work. T
 | `str(path)` | Read a `const char*` or `std::string` member |
 | `setStr(path, value)` | Write a `std::string` member |
 | `expr(code)` / `exprStr(code)` | Evaluate a numeric or string expression against live state |
-| `callStruct(name, args):JitPtr` | Call a function that returns a struct by value |
+| `callStruct(name, args):JitPtr` | Call a function that returns a struct, by value or by reference |
+| `skipped` | Scanned names that cannot be called through the type system, such as templates and `auto` returns |
 | `addrOf(name)` | Address of a variable |
 | `getVar` / `setVar` | Top-level numeric and pointer variables |
 | `getField` / `setField` / `getIndex` / `setIndex` | Explicit access |
@@ -399,7 +400,7 @@ p.readF64(0);   // 5
 p.readF64(8);   // 6
 ```
 
-The buffer behind the handle belongs to the function, so the next call to the same function overwrites it. Copy what you need, or keep a different function per slot.
+The handle owns a copy of the result, so it stays readable after later calls. A function that returns `const Vec2&` is copied the same way. `callAuto` on such a function returns the address of a copy that the module keeps for the next eight struct results.
 
 References to a struct work the same way, since a reference reaches the callee as an address:
 
@@ -703,7 +704,7 @@ m.image.relocCount;    // applied relocations
 m.image.imports;       // resolved dependencies
 ```
 
-A manually mapped module is not in the system module list; `GetModuleHandle` cannot find it and `FreeLibrary` does not free it. Unload through `Jit.dispose`. For threads that touch TLS variables inside the library, call `JitLoader.bindThread()` on that thread.
+A manually mapped module is not in the system module list; `GetModuleHandle` cannot find it and `FreeLibrary` does not free it. Unload through `Jit.dispose`. For threads that touch TLS variables inside the library, call `JitLoader.bindThread()` on that thread. Once the image is loaded its executable segments are switched to read and execute, so the mapping is no longer writable as a whole.
 
 The same option on Linux maps the ELF image instead of calling `dlopen`: program headers are copied, relocations are applied from the dynamic section, and `DT_INIT`, `DT_INIT_ARRAY`, `DT_FINI` and `DT_FINI_ARRAY` run in order.
 
@@ -820,14 +821,15 @@ Time goes into compiler process startup and linking, not into the amount of code
 
 - Up to six numeric and four string arguments per call
 - Return values are numeric or `void`; pointers come back as addresses and `std::string` results go through `callStr`
-- Struct results by value land in a ring of eight per function and per thread, so the last eight results stay readable
+- Struct results arrive as an owned copy; the raw address `callAuto` returns stays readable for eight further struct results
+- `rjit_init` returning non zero fails the load and leaves the module unusable
 - Default arguments are filled from the declaration, so a call may pass fewer arguments than the signature lists
 - Overloads resolve by argument count, then by runtime argument types through `callDyn`; when two candidates score the same, `callDyn` reports it and the call needs `callSig`
 - Every guarded call costs an indirect jump; `callFast` removes the fault guard but also removes crash containment
 - A fault caught on Linux leaves the C++ runtime as it was at the moment of the signal; a destroyed lock or a half written buffer is not repaired
 - Compilation needs a local compiler; target machines fall back to the cache
 - A C++ exception thrown by compiled code is caught at the boundary, reported as a failed call, and its `what()` text is written to the log
-- The exception handler of a hand mapped image is never reached: its unwind table is registered and lookups against it succeed, but the C++ runtime does not dispatch into the mapped copy, so such sources go through the system loader instead
+- The exception handler of a hand mapped image is never reached: its unwind table is registered and lookups against it succeed, but the C++ runtime does not dispatch into the mapped copy, so every unit whose text mentions `throw`, `catch` or `try` goes through the system loader instead. A throw that no scanned unit shows, such as one inside an included header, ends as a failed call rather than a process exit, because the guard covers the abort on Linux and the host handler on Windows
 - Build timeout terminates the compiler process
 - Struct accessors cover leaf fields up to three levels of nesting, including pointer, `const char*` and `std::string` members
 - Manual mapping handles PE on Windows and ELF64 on Linux; other formats use the system loader
@@ -835,7 +837,7 @@ Time goes into compiler process startup and linking, not into the amount of code
 - ELF manual mapping serves thread-local storage through a general-dynamic resolver it installs itself; an image that addresses TLS through the thread pointer instead is handed to the system loader, even with `loader: "manual"`
 - Reference parameters cover scalars, structs and `std::string`; a mutable `std::string&` writes back through `callStr` or `callStrBoth`, and other reference types need a wrapper
 - Changing the ABI header layout requires clearing the host precompiled header and rebuilding
-- A callback fired from a native thread is queued and runs on the thread that calls `Jit.tick()`; the native thread waits for it, for at most `Jit.threadTimeout` milliseconds, and then receives zero
+- A callback fired from a native thread is queued and runs on the thread that calls `Jit.tick()`; the native thread waits for it, for at most `Jit.threadTimeout` milliseconds, and then receives zero. The next `Jit.tick()` reports how many calls timed out and which callback was last
 - `RJIT(abi)`, `RJIT(init)` and `RJIT(deinit)` collide with the module entry points the loader emits; name module functions something else
 - The build lock is per process; two processes building the same key at the same time still race on object files
 
@@ -843,7 +845,7 @@ Time goes into compiler process startup and linking, not into the amount of code
 
 ## Testing
 
-`test/` is a standalone console project with 424 assertions.
+`test/` is a standalone console project with 439 assertions.
 
 `example/` is a two file project that compiles a module and calls it:
 
