@@ -52,6 +52,8 @@ class JitCompiler {
   public var extra:Array<String> = [];
   public var lastCommand:String = "";
   public var timeoutMs:Int = 90000;
+  public var lockWaitMs:Int = 120000;
+  public var lockStaleSeconds:Float = 600.0;
   public var usePch:Bool = true;
   #if target.threaded
   static var pchLock = new sys.thread.Mutex();
@@ -146,15 +148,41 @@ class JitCompiler {
   public function build(key:String, src:String, lineShift:Int = 0, sigs:Array<String> = null, multi:JitMulti = null):JitResult {
     var mu = keyLock(key);
     mu.acquire();
+    var lockPath = cache.root + "/locks/" + key + ".lock";
+    JitCache.mkdirs(cache.root + "/locks");
+    var lk = acquireLock(lockPath);
     var r:JitResult = null;
+    var err:Dynamic = null;
     try {
       r = buildLocked(key, src, lineShift, sigs, multi);
     } catch (e:Dynamic) {
-      mu.release();
-      throw e;
+      err = e;
+    }
+    if (lk != 0) {
+      JitNative.unlockFile(lk);
+      try if (FileSystem.exists(lockPath)) FileSystem.deleteFile(lockPath) catch (e:Dynamic) {}
     }
     mu.release();
+    if (err != null) throw err;
     return r;
+  }
+
+  function acquireLock(path:String):cpp.SizeT {
+    var t0 = Sys.time();
+    while (true) {
+      var h = JitNative.lockFile(path);
+      if (h != 0) return h;
+      try {
+        var st = FileSystem.stat(path);
+        if (Sys.time() - st.mtime.getTime() / 1000.0 > lockStaleSeconds) {
+          FileSystem.deleteFile(path);
+          continue;
+        }
+      } catch (e:Dynamic) {}
+      if ((Sys.time() - t0) * 1000.0 > lockWaitMs) return 0;
+      Sys.sleep(0.02);
+    }
+    return 0;
   }
 
   function buildLocked(key:String, src:String, lineShift:Int, sigs:Array<String>, multi:JitMulti):JitResult {

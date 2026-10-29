@@ -65,6 +65,7 @@ class Jit {
   static var defaultLoader:String = "loadlib";
   static var watched:Array<{path:String, name:String, sig:String, cb:Null<JitModule->Void>, mt:Float, sz:Int}> = [];
   public static var watchEvery:Int = 30;
+  public static var poisonOnFault:Bool = true;
   public static var threadTimeout(default, set):Int = 2000;
 
   static function set_threadTimeout(v:Int):Int {

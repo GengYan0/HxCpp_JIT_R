@@ -28,6 +28,7 @@ class JitModule {
   public var ms:Float = 0.0;
   public var cached:Bool = false;
   public var pinned:Bool = false;
+  public var poisoned:Bool = false;
   public var calls:Int = 0;
   public var image:JitImage = null;
   public var extraSources:Array<String> = null;
@@ -39,6 +40,7 @@ class JitModule {
   var index:Map<String, Int> = new Map();
   var ptrs:Array<cpp.SizeT> = [];
   var misses:Map<String, Bool> = new Map();
+  var poisonReported:Bool = false;
   var fns:Map<String, JitFnInfo> = new Map();
   var bySig:Map<String, JitFnInfo> = new Map();
   var sigsOf:Map<String, Array<String>> = new Map();
@@ -174,9 +176,21 @@ class JitModule {
     return new JitPtr(address(n));
   }
 
-  static inline function guard(r:Float, method:String, n:String):Float {
+  inline function guard(r:Float, method:String, n:String):Float {
+    if (poisoned) {
+      if (!poisonReported) {
+        poisonReported = true;
+        JitHost.error(method, n, "the module faulted earlier and was not repaired, reload it");
+      }
+      return 0.0;
+    }
     if (r != r) {
-      JitHost.error(method, n, "native exception caught");
+      if (JitNative.isFault(r) != 0 && Jit.poisonOnFault) {
+        poisoned = true;
+        JitHost.error(method, n, "the call faulted, the module is marked unusable, reload it");
+      } else {
+        JitHost.error(method, n, "native exception caught");
+      }
       return 0.0;
     }
     return r;
@@ -730,37 +744,186 @@ class JitModule {
   }
 
   public function callWide(n:String, wide:Array<haxe.Int64>, ?nums:Array<Float>, ?strs:Array<String>):haxe.Int64 {
-    var ws:Array<haxe.Int64> = wide == null ? [] : wide;
-    var ns:Array<Float> = nums == null ? [] : nums;
-    var f = pick(n, ws.length + ns.length, strs == null ? 0 : strs.length);
+    var ws = wide == null ? [] : wide;
+    var ns = nums == null ? [] : nums;
+    var ss = strs == null ? [] : strs;
+    var f = pickWide(n, ws.length, ns.length, ss.length);
+    if (f == null) {
+      JitHost.error("callWide", n, "no signature fits " + ws.length + " 64 bit, " + ns.length + " numeric and " + ss.length + " string arguments, use callWideSig when overloads fit the same counts");
+      return haxe.Int64.ofInt(0);
+    }
+    return callWideSig(n, f.sig, ws, ns, ss);
+  }
+
+  public function callWideSig(n:String, sig:String, wide:Array<haxe.Int64>, ?nums:Array<Float>, ?strs:Array<String>):haxe.Int64 {
+    var f = bySig.get(n + "|" + sig);
     if (f == null) f = fns.get(n);
-    if (f == null || !f.callable || handle == 0) return haxe.Int64.ofInt(0);
+    if (f == null || !f.callable || handle == 0) {
+      JitHost.error("callWide", n, "signature " + sig + " is not callable");
+      return haxe.Int64.ofInt(0);
+    }
+    if (f.ret == "S" || f.ret == "t" || f.ret == "R" || f.ret == "v") {
+      JitHost.error("callWide", n, "a " + f.ret + " result does not fit an Int64");
+      return haxe.Int64.ofInt(0);
+    }
     var fp = ptrOf(n, f.sig);
     if (fp == 0) fp = resolve("rjit_ptr_" + n);
-    var d = resolve(JitCodegen.wideDispName(f.sig));
-    if (fp == 0 || d == 0) return haxe.Int64.ofInt(0);
+    var d = resolve(JitCodegen.wideNameOf(f));
+    if (fp == 0 || d == 0) {
+      JitHost.error("callWide", n, "no wide entry point was generated for " + f.sig);
+      return haxe.Int64.ofInt(0);
+    }
+    var ws = wide == null ? [] : wide;
+    var ns = nums == null ? [] : nums;
+    var ss = strs == null ? [] : strs;
     var slots:Array<Float> = [];
+    var texts:Array<String> = [];
     var wi = 0;
     var ni = 0;
-    for (c in f.args) {
-      if (c == "s" || c == "S") continue;
+    var si = 0;
+    var bad = "";
+    for (i in 0...f.args.length) {
+      var c = f.args[i];
+      var def = f.defaults[i];
       if (c == "l") {
-        var v = wi < ws.length ? ws[wi] : haxe.Int64.ofInt(0);
-        wi++;
+        var v:haxe.Int64;
+        if (wi < ws.length) {
+          v = ws[wi];
+          wi++;
+        } else {
+          var dv = defaultNumber(def);
+          if (dv == null) {
+            bad = "argument " + i + " is 64 bit and has no default";
+            break;
+          }
+          v = haxe.Int64.fromFloat(dv);
+        }
         slots.push(JitNative.bitsOf64(v.low, v.high));
+      } else if (c == "s" || c == "S" || c == "R" || c == "W") {
+        if (si < ss.length) {
+          texts.push(ss[si]);
+          si++;
+        } else {
+          var ds = defaultText(def);
+          if (ds == null) {
+            bad = "argument " + i + " is text and has no default";
+            break;
+          }
+          texts.push(ds);
+        }
       } else {
-        slots.push(ni < ns.length ? ns[ni] : 0.0);
-        ni++;
+        var nv:Null<Float>;
+        if (ni < ns.length) {
+          nv = ns[ni];
+          ni++;
+        } else {
+          nv = defaultNumber(def);
+          if (nv == null) {
+            bad = "argument " + i + " has no default";
+            break;
+          }
+        }
+        slots.push(nv);
       }
     }
+    if (bad == "") {
+      if (wi < ws.length) bad = "too many 64 bit arguments";
+      else if (ni < ns.length) bad = "too many numeric arguments";
+      else if (si < ss.length) bad = "too many string arguments";
+    }
+    if (bad != "") {
+      JitHost.error("callWide", n, bad);
+      return haxe.Int64.ofInt(0);
+    }
     calls++;
-    var r = usesStr(f.sig)
+    var r = texts.length > 0 || usesStr(f.sig)
       ? JitNative.callViaB(d, fp, ctx, slots.length, a(slots, 0), a(slots, 1), a(slots, 2), a(slots, 3), a(slots, 4), a(slots, 5),
-          bytesOf(strs, 0), bytesOf(strs, 1), bytesOf(strs, 2), bytesOf(strs, 3))
+          bytesOf(texts, 0), bytesOf(texts, 1), bytesOf(texts, 2), bytesOf(texts, 3))
       : JitNative.callVia(d, fp, ctx, slots.length, a(slots, 0), a(slots, 1), a(slots, 2), a(slots, 3), a(slots, 4), a(slots, 5));
-    if (r != r) return haxe.Int64.ofInt(0);
+    if (r != r) {
+      if (JitNative.isFault(r) != 0 && Jit.poisonOnFault) {
+        poisoned = true;
+        JitHost.error("callWide", n, "the call faulted, the module is marked unusable, reload it");
+      } else {
+        JitHost.error("callWide", n, "native exception caught");
+      }
+      return haxe.Int64.ofInt(0);
+    }
     if (f.ret == "l") return haxe.Int64.make(JitNative.hiOf64(r), JitNative.loOf64(r));
-    return haxe.Int64.ofInt(Std.int(r));
+    return haxe.Int64.fromFloat(r);
+  }
+
+  function pickWide(n:String, wc:Int, nc:Int, sc:Int):JitFnInfo {
+    var list = sigsOf.get(n);
+    if (list == null || list.length <= 1) return fns.get(n);
+    var best:JitFnInfo = null;
+    var tie = false;
+    for (sg in list) {
+      var f = bySig.get(n + "|" + sg);
+      if (f == null) continue;
+      if (!f.callable) continue;
+      var wi = 0;
+      var ni = 0;
+      var si = 0;
+      var ok = true;
+      for (i in 0...f.args.length) {
+        var c = f.args[i];
+        var hasDef = f.defaults[i] != null && f.defaults[i] != "";
+        if (c == "l") {
+          if (wi < wc) wi++
+          else if (!hasDef) { ok = false; break; }
+        } else if (c == "s" || c == "S" || c == "R" || c == "W") {
+          if (si < sc) si++
+          else if (!hasDef) { ok = false; break; }
+        } else {
+          if (ni < nc) ni++
+          else if (!hasDef) { ok = false; break; }
+        }
+      }
+      if (!ok || wi != wc || ni != nc || si != sc) continue;
+      if (best == null) best = f else tie = true;
+    }
+    if (tie) return null;
+    return best;
+  }
+
+  public static function defaultNumber(t:String):Null<Float> {
+    if (t == null) return null;
+    var s = StringTools.trim(t);
+    if (s == "") return null;
+    if (s == "true") return 1.0;
+    if (s == "false") return 0.0;
+    if (s.length == 3 && s.charAt(0) == "'" && s.charAt(2) == "'") return s.charCodeAt(1);
+    if (s.charAt(0) == '"' || s.charAt(0) == '\'') return null;
+    while (s.length > 0 && "fFuUlL".indexOf(s.charAt(s.length - 1)) >= 0) s = s.substr(0, s.length - 1);
+    if (s == "") return null;
+    var neg = false;
+    if (s.charAt(0) == "-") {
+      neg = true;
+      s = s.substr(1);
+    } else if (s.charAt(0) == "+") s = s.substr(1);
+    if (StringTools.startsWith(s, "0x") || StringTools.startsWith(s, "0X")) {
+      var v = 0.0;
+      for (i in 2...s.length) {
+        var c = s.charAt(i);
+        var d = "0123456789abcdef".indexOf(c.toLowerCase());
+        if (d < 0) return null;
+        v = v * 16.0 + d;
+      }
+      return neg ? -v : v;
+    }
+    var f = Std.parseFloat(s);
+    if (Math.isNaN(f)) return null;
+    return neg ? -f : f;
+  }
+
+  public static function defaultText(t:String):Null<String> {
+    if (t == null) return null;
+    var s = StringTools.trim(t);
+    if (s.length < 2) return null;
+    var q = s.charAt(0);
+    if ((q == '"' || q == '\'') && s.charAt(s.length - 1) == q) return s.substring(1, s.length - 1);
+    return null;
   }
 
   public static inline function usesStr(sig:String):Bool {

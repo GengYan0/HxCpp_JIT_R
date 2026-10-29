@@ -15,6 +15,7 @@ package hxcpp_jit_r;
 #include <setjmp.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <fcntl.h>
 #endif
 #include <stdlib.h>
 #include <string.h>
@@ -34,13 +35,20 @@ static double rjit_nan(void) {
   return d;
 }
 
+static double rjit_fault(void) {
+  unsigned long long bits = 0x7FF80000DEAD0001ULL;
+  double d;
+  memcpy(&d, &bits, sizeof(d));
+  return d;
+}
+
 #ifdef _WIN32
 
 static double rjit_guard2(double (*fn)(RJitCtx*, RJitArgs*), RJitCtx* c, RJitArgs* a) {
   __try {
     return fn(c, a);
   } __except (EXCEPTION_EXECUTE_HANDLER) {
-    return rjit_nan();
+    return rjit_fault();
   }
 }
 
@@ -48,7 +56,7 @@ static double rjit_guard3(double (*fn)(RJitCtx*, void*, RJitArgs*), RJitCtx* c, 
   __try {
     return fn(c, f, a);
   } __except (EXCEPTION_EXECUTE_HANDLER) {
-    return rjit_nan();
+    return rjit_fault();
   }
 }
 
@@ -106,7 +114,7 @@ static double rjit_guard2(double (*fn)(RJitCtx*, RJitArgs*), RJitCtx* c, RJitArg
   if (saved >= RJIT_GUARD_DEPTH) return rjit_nan();
   if (sigsetjmp(rjit_jb[saved], 1) != 0) {
     rjit_guard_depth = saved;
-    return rjit_nan();
+    return rjit_fault();
   }
   rjit_guard_depth = saved + 1;
   double r = fn(c, a);
@@ -120,7 +128,7 @@ static double rjit_guard3(double (*fn)(RJitCtx*, void*, RJitArgs*), RJitCtx* c, 
   if (saved >= RJIT_GUARD_DEPTH) return rjit_nan();
   if (sigsetjmp(rjit_jb[saved], 1) != 0) {
     rjit_guard_depth = saved;
-    return rjit_nan();
+    return rjit_fault();
   }
   rjit_guard_depth = saved + 1;
   double r = fn(c, f, a);
@@ -977,6 +985,35 @@ class JitNative {
 
   @:functionCode('return (size_t)&rjit_tls_get;')
   public static function tlsAddr():cpp.SizeT return 0;
+
+  @:functionCode('
+    unsigned long long b = 0;
+    memcpy(&b, &v0, 8);
+    return b == 0x7FF80000DEAD0001ULL ? 1 : 0;
+  ')
+  public static function isFault(v0:Float):Int return 0;
+
+  @:functionCode('
+    const char* p = path.utf8_str();
+    if (p == 0) return (size_t)0;
+#ifdef _WIN32
+    HANDLE h = CreateFileA(p, 0x40000000, 0, 0, 1, 0x80, 0);
+    return h == INVALID_HANDLE_VALUE ? (size_t)0 : (size_t)h;
+#else
+    int fd = ::open(p, O_CREAT | O_EXCL | O_WRONLY, 0644);
+    return fd < 0 ? (size_t)0 : (size_t)(long)fd + 1;
+#endif
+  ')
+  public static function lockFile(path:String):cpp.SizeT return 0;
+
+  @:functionCode('
+#ifdef _WIN32
+    CloseHandle((HANDLE)(size_t)h);
+#else
+    if (h > 0) ::close((int)((size_t)h - 1));
+#endif
+  ')
+  public static function unlockFile(h:cpp.SizeT):Void {}
 
   @:functionCode('
     long long v = ((long long)(unsigned long long)(unsigned int)hi << 32) | (unsigned long long)(unsigned int)lo;

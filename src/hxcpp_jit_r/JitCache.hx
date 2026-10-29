@@ -233,7 +233,7 @@ class JitCache {
     return m;
   }
 
-  static function mkdirs(p:String):Void {
+  public static function mkdirs(p:String):Void {
     if (FileSystem.exists(p)) return;
     var parent = parentOf(p);
     if (parent != null && parent != p) mkdirs(parent);

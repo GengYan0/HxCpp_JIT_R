@@ -22,6 +22,13 @@ static inline double rjit_nan_val() {
 #endif
 }
 
+static inline double rjit_fault_val() {
+  unsigned long long b = 0x7FF80000DEAD0001ULL;
+  double d = 0.0;
+  memcpy(&d, &b, 8);
+  return d;
+}
+
 static inline long long rjit_bits_i64(double v) {
   long long r = 0;
   memcpy(&r, &v, 8);
