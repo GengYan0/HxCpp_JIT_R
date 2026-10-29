@@ -28,7 +28,7 @@ typedef JitMulti = {
 }
 
 class JitCompiler {
-  static var DIAG_WIN = ~/^(.+?)\(([0-9]+)(,([0-9]+))?\) *: *(fatal error|error|warning) ?([A-Z]+[0-9]+)? *: *(.*)$/;
+  static var DIAG_WIN = ~/^(.+)\(([0-9]+)(,([0-9]+))?\) *: *(fatal error|error|warning) ?([A-Z]+[0-9]+)? *: *(.*)$/;
   static var DIAG_NIX = ~/^(.+?):([0-9]+)(:([0-9]+))?: *(fatal error|error|warning) ?([A-Z]+[0-9]+)? *: *(.*)$/;
 
   static var lockMu = new sys.thread.Mutex();
@@ -352,6 +352,8 @@ class JitCompiler {
     try ob = p.stdout.readAll() catch (e:Dynamic) {}
     #if target.threaded
     done.wait();
+    #else
+    try eb = p.stderr.readAll() catch (e:Dynamic) {}
     #end
     alive[0] = false;
     var code = p.exitCode();
