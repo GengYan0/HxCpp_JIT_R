@@ -959,6 +959,21 @@ double alive() { return counter + hits[1]; }
     eq("allman and namespace scanned", [for (f in allman) f.name].join(","), "ind");
     var raw = JitScan.functions('const char* s = R"(a"b)";\nint after_raw(double v) { return (int)v; }\n');
     eq("raw string keeps the scanner in sync", [for (f in raw) f.name].join(","), "after_raw");
+    eq("signed long long is wide", JitScan.code("signed long long"), "l");
+    eq("signed long is wide", JitScan.code("signed long"), "l");
+    eq("signed int is signed", JitScan.code("signed int"), "i");
+    eq("size_t is wide", JitScan.code("size_t"), "l");
+    eq("unsigned long long int is wide", JitScan.code("unsigned long long int"), "l");
+    var nsg = JitScan.globals("namespace ns {\n    int inside = 7;\n    double other;\n}\nint outside;\n");
+    eq("namespace globals are scanned", [for (v in nsg) v.name].join(","), "inside,other,outside");
+    var guard = JitScan.globals("int top;\nint f(int a) {\n  int local = 1;\n  return local;\n}\n");
+    eq("locals stay out of the global table", [for (v in guard) v.name].join(","), "top");
+    var en = JitScan.functions("enum Color { Red, Green };\nint pick(Color c) { return (int)c; }\nColor make(int v) { return (Color)v; }\n");
+    eq("enum argument is an int", [for (f in en) if (f.name == "pick") f.sig].join(""), "i(i)");
+    eq("enum return is an int", [for (f in en) if (f.name == "make") f.sig].join(""), "i(i)");
+    var baddef = JitScan.functions("double tw(double a = M_PI) { return a * 2; }\ndouble okdef(double a = 1.5) { return a; }\n");
+    eq("a header constant default is refused", [for (f in baddef) if (f.name == "tw") Std.string(f.callable)].join(""), "false");
+    eq("a numeric default is kept", [for (f in baddef) if (f.name == "okdef") Std.string(f.callable)].join(""), "true");
 
     head("thread local blocks");
     var seed = haxe.io.Bytes.alloc(8);
@@ -1109,6 +1124,25 @@ int nstd(const std::string& s) { return (int)s.size(); }
     ok("pointer callback built", pp != 0, "");
     var paddr = pm.address("passptr");
     eq("a pointer survives the callback channel", Std.string(pm.callAuto("passptr", [paddr, pp]) == paddr), "true");
+
+    head("wide integers");
+    var wm = Jit.compile("wide", '
+long long add64(long long a, long long b) { return a + b; }
+long long big64() { return 9007199254740993LL; }
+unsigned long long mix64(const char* s, unsigned long long seed) { unsigned long long h = seed; for (int i = 0; s[i]; i++) h = h * 1099511628211ULL + (unsigned char)s[i]; return h; }
+long long plain(long long a) { return a; }
+');
+    ok("wide module compiles", wm.ok, wm.diag.length > 0 ? JitCompiler.describe(wm.diag[0]) : "");
+    var wideStr = function(v:haxe.Int64):String return v.high + ":" + v.low;
+    var p53 = haxe.Int64.make(0x00200000, 0x00000001);
+    eq("wide sum is exact", wideStr(wm.callWide("add64", [p53, haxe.Int64.ofInt(1)])), "2097152:2");
+    eq("wide return is exact", wideStr(wm.callWide("big64", [])), "2097152:1");
+    var s1 = haxe.Int64.make(0x00200000, 0x00000001);
+    var s2 = haxe.Int64.make(0x00200000, 0x00000002);
+    var h1 = wideStr(wm.callWide("mix64", [s1], [], ["x"]));
+    var h2 = wideStr(wm.callWide("mix64", [s2], [], ["x"]));
+    ok("a wide seed keeps its low bits", h1 != h2, h1 + " vs " + h2);
+    eq("the numeric path is unchanged", Std.string(wm.callAuto("plain", [7])), "7");
 
     var stub = "";
     for (mod in Jit.all()) if (StringTools.startsWith(mod.name, "rjitcb_label_")) stub = mod.name;

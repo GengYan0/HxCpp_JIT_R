@@ -1,6 +1,6 @@
 # HxCpp_JIT_R
 
-0.1.22
+0.1.23
 
 Compile and call native C++ while your application is running. Hand it a source string, get a module back, call its functions like any Haxe method.
 
@@ -155,7 +155,7 @@ m.callAuto("bump", []);
 m.getVar("counter");        // 1
 ```
 
-Scanning is line based: an export or a global keeps its whole signature, the default arguments and the opening brace on one line, and the opening brace may also sit on the next line. Functions inside a namespace are found at any indentation; anything inside a class, struct or function body is left alone. A signature the type system cannot express through numbers and strings, such as a template or an `auto` return, is listed in `module.skipped`.
+Scanning is line based: an export or a global keeps its whole signature, the default arguments and the opening brace on one line, and the opening brace may also sit on the next line. Functions and globals inside a namespace are found at any indentation; anything inside a class, struct or function body is left alone. A signature the type system cannot express through numbers and strings, such as a template or an `auto` return, is listed in `module.skipped`.
 
 The standard library, inline assembly, SIMD intrinsics and templates all work. The default is `/MT`, so the library carries its own C runtime.
 
@@ -207,6 +207,7 @@ The standard library, inline assembly, SIMD intrinsics and templates all work. T
 | `setStr(path, value)` | Write a `std::string` member |
 | `expr(code)` / `exprStr(code)` | Evaluate a numeric or string expression against live state |
 | `callStruct(name, args):JitPtr` | Call a function that returns a struct, by value or by reference |
+| `callWide(name, wide, ?nums, ?strs):Int64` | Call with full 64 bit integers; `wide` fills the `l` arguments in order |
 | `skipped` | Scanned names that cannot be called through the type system, such as templates and `auto` returns |
 | `image.codePages` | Executable pages switched to read and execute after the image was mapped |
 | `addrOf(name)` | Address of a variable |
@@ -659,7 +660,7 @@ Jit.compile("cbstr", 'int slen(const char* (*f)(double), double v) { const char*
 
 The text a string callback returns belongs to the host and stays valid until the next call to that callback.
 
-A stub is compiled into a module named `rjitcb_<name>_<shape>`. Native code keeps the pointer, so that module is not unloaded when it leaves the module table: `Jit.dispose` on it frees the context and keeps the code mapped, and `Jit.callback` returns the same address for the same name and shape. One image per distinct name and shape stays mapped for the process, so a name taken from a counter costs one image each. A callback whose name has nothing bound under it returns zero and reports it once through `JitHost.error`.
+A stub is compiled into a module named `rjitcb_<name>_<shape>`. Native code keeps the pointer, so that module is not unloaded when it leaves the module table: `Jit.dispose` on it frees the context and keeps the code mapped, and `Jit.callback` returns the same address for the same name and shape. One image per distinct name and shape stays mapped for the process, so a name taken from a counter costs one image each. A callback whose name has nothing bound under it returns zero and reports it once through `JitHost.error`. Sixteen callbacks can be waiting at once; one that finds no free slot returns zero and is counted, and the next `Jit.tick()` reports the count and the last name.
 
 ### Session
 
@@ -772,6 +773,8 @@ if (!m.ok) {
 
 Signatures use `returnCode(argumentCodes)`: `d(dd)`, `i(is)`, `i(SS)`, `S(S)`, `v()`.
 
+The `l` row covers `long long`, `long`, `size_t`, `ptrdiff_t`, `intptr_t`, `uintptr_t`, `int64_t` and `uint64_t`, with or without a `signed` or `unsigned` prefix. Their values cross the numeric slots as doubles, so the ordinary call path keeps 53 bits; `callWide` passes the full 64 and returns an `Int64`.
+
 ```haxe
 m.signature("clamp");            // "d(ddd)"
 m.callSig("area", "i(i)", [3]);  // pick one overload
@@ -832,6 +835,9 @@ Time goes into compiler process startup and linking, not into the amount of code
 - Return values are numeric or `void`; pointers come back as addresses and `std::string` results go through `callStr`
 - A function returning `std::string` by reference is listed in `module.skipped`; return by value instead
 - A template function, or one whose return type is `auto`, is also listed in `module.skipped`; the type system cannot call it
+- A 64 bit integer keeps 53 bits on the ordinary call path; `callWide` carries all 64, for arguments and results
+- A default argument must be a literal, such as a number, a quoted string, `true`, `false` or `nullptr`; a name from a header puts the function in `module.skipped`
+- An enum type is read as an `int`, for arguments and returns
 - `JitNative.peek` and `JitNative.poke` take any address and no check stands between them and the process 
 - A guard that fires abandons the faulting frame without unwinding it, so a module that faulted is not repaired; reload it
 - A callback stub keeps its image mapped for the process, because native code holds its address
@@ -859,7 +865,7 @@ Time goes into compiler process startup and linking, not into the amount of code
 
 ## Testing
 
-`test/` is a standalone console project with 457 assertions.
+`test/` is a standalone console project with 473 assertions.
 
 `example/` is a two file project that compiles a module and calls it:
 
