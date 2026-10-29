@@ -33,14 +33,18 @@ class JitCodegen {
     var ptrs = new Map<String, Bool>();
     for (f in fns) {
       if (f.ret == "t") {
-        used = true;
-        b.add(retWrapper(f));
+        if (f.callable) {
+          used = true;
+          b.add(retWrapper(f));
+        }
         continue;
       }
       if (f.ret == "S") {
-        used = true;
-        needString = true;
-        b.add(strWrapper(f));
+        if (f.callable) {
+          used = true;
+          needString = true;
+          b.add(strWrapper(f));
+        }
         continue;
       }
       if (!f.callable) continue;

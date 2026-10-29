@@ -273,7 +273,7 @@ class Jit {
     JitHost.add(m);
     if (verbose) {
       var tag = m.cached ? "cached" : Std.int(m.ms) + "ms";
-      Sys.println('[jit] $name ok ($tag)' + (m.symbols.length > 0 ? " " + m.symbols.toString() : "") + (m.skipped.length > 0 ? " skipped: " + m.skipped.join(",") : ""));
+      Sys.println('[jit] $name ok ($tag)' + (m.symbols.length > 0 ? " " + m.symbols.toString() : ""));
     }
     return m;
   }

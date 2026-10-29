@@ -344,7 +344,7 @@ class JitScan {
       if (rc == "v" && !isVoid(ret)) ok = false;
       if (rc == "?" && sts.exists(valueType(ret))) rc = "t";
       if (rc == "?") ok = false;
-      if (rc == "S" || rc == "R") ok = false;
+      if (rc == "R") ok = false;
       var sig = rc + "(" + args.join("") + ")";
       var local = ret.indexOf("static") >= 0 || ret.indexOf("inline") >= 0;
       out.push({name: name, ret: rc, args: args, sig: sig, callable: ok, rawRet: ret, rawArgs: rawArgs, defaults: defaults, isStatic: local});

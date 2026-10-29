@@ -4,9 +4,9 @@
   "license": "MIT",
   "tags": ["cpp", "jit", "native", "windows", "msvc", "runtime", "hot-reload"],
   "description": "Compile and call native C++ from a hxcpp application at runtime.",
-  "version": "0.1.19",
+  "version": "0.1.20",
   "classPath": "src",
-  "releasenote": "beta: the mapped image reports how many code pages it switched to read and execute",
+  "releasenote": "beta: a string returning function is callable again instead of being listed as skipped",
   "contributors": ["GengYan0"],
   "dependencies": {}
 }
