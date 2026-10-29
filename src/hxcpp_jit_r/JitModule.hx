@@ -21,6 +21,7 @@ class JitModule {
   public var src:String;
   public var dll:String = "";
   public var symbols:Array<String> = [];
+  public var skipped:Array<String> = [];
   public var diag:Array<JitDiag> = [];
   public var log:String = "";
   public var ok:Bool = false;
@@ -131,12 +132,14 @@ class JitModule {
     vars = new Map();
     sigsOf = new Map();
     structs = new Map();
+    skipped = [];
     var texts = allSources();
     for (t in texts) for (s in JitScan.structs(t)) structs.set(s.name, s);
     var allStructs = [];
     for (t in texts) for (st in JitScan.structs(t)) allStructs.push(st);
     for (t in texts) {
       for (f in JitScan.functions(t, allStructs)) {
+        if (!f.callable && skipped.indexOf(f.name) < 0) skipped.push(f.name);
         if (!bySig.exists(f.name + "|" + f.sig)) bySig.set(f.name + "|" + f.sig, f);
         if (!fns.exists(f.name)) fns.set(f.name, f);
         var a = sigsOf.get(f.name);
@@ -826,6 +829,9 @@ class JitModule {
     return JitHost.takeRet(id);
   }
 
+  var structRing:Array<haxe.io.Bytes> = [];
+  var structSlot:Int = 0;
+
   public function callStruct(n:String, args:Array<Float> = null, ?strs:Array<String>):JitPtr {
     var f = fns.get(n);
     if (f == null || f.ret != "t" || handle == 0) return new JitPtr(0);
@@ -840,7 +846,17 @@ class JitModule {
       ? JitNative.invokeB(p, ctx, ar.length, a(ar, 0), a(ar, 1), a(ar, 2), a(ar, 3), a(ar, 4), a(ar, 5),
           bytesOf(strs, 0), bytesOf(strs, 1), bytesOf(strs, 2), bytesOf(strs, 3))
       : JitNative.invoke(p, ctx, ar.length, a(ar, 0), a(ar, 1), a(ar, 2), a(ar, 3), a(ar, 4), a(ar, 5));
-    return new JitPtr(guard(r, "callStruct", n));
+    var addr = guard(r, "callStruct", n);
+    if (addr == 0) return new JitPtr(0);
+    var szp = resolve("rjit_szr_" + JitCodegen.ptrName(n, f.sig));
+    if (szp == 0) return new JitPtr(addr);
+    var sz = Std.int(JitNative.invoke(szp, ctx, 0, 0, 0, 0, 0, 0, 0));
+    if (sz <= 0) return new JitPtr(addr);
+    var b = haxe.io.Bytes.alloc(sz);
+    JitNative.copyOut(JitNative.toSizeT(addr), b, sz);
+    if (structRing.length < 8) structRing.push(b) else structRing[structSlot & 7] = b;
+    structSlot++;
+    return new JitPtr(JitLoader.ptrOf(b), b);
   }
 
   public function callStrBoth(n:String, args:Array<Float> = null, ?strs:Array<String>):{a:String, b:String} {
@@ -972,7 +988,7 @@ class JitModule {
     Jit.forget(this);
     if (handle != 0) {
       var d = resolve("rjit_deinit");
-      if (d != 0) JitNative.invoke(d, ctx, 0, 0, 0, 0, 0, 0, 0);
+      if (d != 0) JitNative.callVoid2(d, ctx, 0);
     }
     JitHost.remove(id);
     if (handle == 0) {

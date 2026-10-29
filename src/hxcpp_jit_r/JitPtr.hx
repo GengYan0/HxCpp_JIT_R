@@ -2,9 +2,11 @@ package hxcpp_jit_r;
 
 class JitPtr {
   public var address:Float;
+  public var keep(default, null):haxe.io.Bytes;
 
-  public function new(address:Float = 0.0) {
+  public function new(address:Float = 0.0, ?keep:haxe.io.Bytes) {
     this.address = address;
+    this.keep = keep;
   }
 
   public function isNull():Bool {
