@@ -1,6 +1,6 @@
 # HxCpp_JIT_R
 
-0.1.23
+0.5.0
 
 Compile and call native C++ while your application is running. Hand it a source string, get a module back, call its functions like any Haxe method.
 
@@ -776,6 +776,19 @@ Signatures use `returnCode(argumentCodes)`: `d(dd)`, `i(is)`, `i(SS)`, `S(S)`, `
 The `l` row covers `long long`, `long`, `size_t`, `ptrdiff_t`, `intptr_t`, `uintptr_t`, `int64_t` and `uint64_t`, with or without a `signed` or `unsigned` prefix. Their values cross the numeric slots as doubles, so the ordinary call path keeps 53 bits; `callWide` passes the full 64 and returns an `Int64`.
 
 ```haxe
+var m = Jit.compile("wide", '
+long long scaled(long long v, int factor = 3) { return v * factor; }
+unsigned long long hash(const char* s, unsigned long long seed);
+');
+
+m.callWide("scaled", [haxe.Int64.make(0x00200000, 1)]);        // the default fills factor
+m.callWide("hash", [seed], [], ["abc"]);                       // a string argument as usual
+m.callWideSig("scaled", "l(li)", [seed], [5]);                 // pick an overload by signature
+```
+
+`callWide` takes the `l` arguments in order, then the other numbers, then the strings, and fills a trailing argument from its declaration. A count that matches no signature, an overload that several signatures fit, a text argument without a default, and a result that is not numeric all report through `JitHost.error` and return zero.
+
+```haxe
 m.signature("clamp");            // "d(ddd)"
 m.callSig("area", "i(i)", [3]);  // pick one overload
 ```
@@ -839,7 +852,9 @@ Time goes into compiler process startup and linking, not into the amount of code
 - A default argument must be a literal, such as a number, a quoted string, `true`, `false` or `nullptr`; a name from a header puts the function in `module.skipped`
 - An enum type is read as an `int`, for arguments and returns
 - `JitNative.peek` and `JitNative.poke` take any address and no check stands between them and the process 
-- A guard that fires abandons the faulting frame without unwinding it, so a module that faulted is not repaired; reload it
+- A guard that fires abandons the faulting frame without unwinding it, so the module is marked `poisoned`, every later call returns zero and the first one reports it; reload the module to use it again (`Jit.poisonOnFault = false` keeps the old behaviour)
+- A C++ exception that the boundary caught is not a fault: the frame unwinds, the message reaches the log, and the module stays usable
+- On Windows `long` is 32 bits, so an argument above 2^31 truncates in the call itself, exactly as it does in C++; use `long long` or `int64_t` for a value that needs 64
 - A callback stub keeps its image mapped for the process, because native code holds its address
 - Struct results arrive as an owned copy; the raw address `callAuto` returns stays readable for eight further struct results
 - `rjit_init` returning non zero fails the load and leaves the module unusable
@@ -859,13 +874,13 @@ Time goes into compiler process startup and linking, not into the amount of code
 - Changing the ABI header layout requires clearing the host precompiled header and rebuilding
 - A callback fired from a native thread is queued and runs on the thread that calls `Jit.tick()`; the native thread waits for it, for at most `Jit.threadTimeout` milliseconds, and then receives zero. The next `Jit.tick()` reports how many calls timed out and which callback was last
 - `RJIT(abi)`, `RJIT(init)` and `RJIT(deinit)` collide with the module entry points the loader emits; name module functions something else
-- The build lock is per process; two processes building the same key at the same time still race on object files
+- A build holds a lock file under `<cache>/locks` for its key, so two processes building the same key wait for each other; a lock left by a dead process is taken over after ten minutes
 
 ---
 
 ## Testing
 
-`test/` is a standalone console project with 473 assertions.
+`test/` is a standalone console project with 485 assertions.
 
 `example/` is a two file project that compiles a module and calls it:
 

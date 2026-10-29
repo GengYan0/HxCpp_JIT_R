@@ -4,9 +4,9 @@
   "license": "MIT",
   "tags": ["cpp", "jit", "native", "windows", "msvc", "runtime", "hot-reload"],
   "description": "Compile and call native C++ from a hxcpp application at runtime.",
-  "version": "0.1.23",
+  "version": "0.5.0",
   "classPath": "src",
-  "releasenote": "beta: signed and size_t types scan as 64 bit, callWide carries full 64 bit integers, and namespace globals are found",
+  "releasenote": "stable: full 64 bit integers, cross-process build lock, a faulted module is marked and asks for a reload",
   "contributors": ["GengYan0"],
   "dependencies": {}
 }
