@@ -1,6 +1,6 @@
 # HxCpp_JIT_R
 
-0.1.20
+0.1.21
 
 Compile and call native C++ while your application is running. Hand it a source string, get a module back, call its functions like any Haxe method.
 
@@ -655,6 +655,8 @@ Jit.compile("cbstr", 'int slen(const char* (*f)(double), double v) { const char*
 
 The text a string callback returns belongs to the host and stays valid until the next call to that callback.
 
+A stub is compiled into a module named `rjitcb_<name>_<shape>`. Native code keeps the pointer, so that module is not unloaded when it leaves the module table: `Jit.dispose` on it frees the context and keeps the code mapped, and `Jit.callback` returns the same address for the same name and shape. A callback whose name has nothing bound under it returns zero and reports it once through `JitHost.error`.
+
 ### Session
 
 ```haxe
@@ -693,6 +695,8 @@ JitHost.onError = function(method, name, msg) {
 var m = Jit.compile("risky", 'double boom(double x) { volatile int* p = 0; *p = 1; return x; }');
 m.callAuto("boom", [1]);   // 0, callback fired, process alive
 ```
+
+The call returns zero and the module stays loaded, but the frame that faulted was left by a jump: destructors did not run, a lock it held is still held, a buffer it was writing is still half written. A module that faulted is not repaired. Reload it before using it again.
 
 ### Manual mapping
 
@@ -822,6 +826,9 @@ Time goes into compiler process startup and linking, not into the amount of code
 
 - Up to six numeric and four string arguments per call
 - Return values are numeric or `void`; pointers come back as addresses and `std::string` results go through `callStr`
+- A function returning `std::string` by reference is listed in `module.skipped`; return by value instead
+- A guard that fires abandons the faulting frame without unwinding it, so a module that faulted is not repaired; reload it
+- A callback stub keeps its image mapped for the process, because native code holds its address
 - Struct results arrive as an owned copy; the raw address `callAuto` returns stays readable for eight further struct results
 - `rjit_init` returning non zero fails the load and leaves the module unusable
 - Default arguments are filled from the declaration, so a call may pass fewer arguments than the signature lists
@@ -846,7 +853,7 @@ Time goes into compiler process startup and linking, not into the amount of code
 
 ## Testing
 
-`test/` is a standalone console project with 440 assertions.
+`test/` is a standalone console project with 445 assertions.
 
 `example/` is a two file project that compiles a module and calls it:
 

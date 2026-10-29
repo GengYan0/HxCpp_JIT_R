@@ -1088,6 +1088,22 @@ double apply2(int (*f)(int), double v) { return (double)f((int)v); }
     ok("string callback built", fsp != 0, "");
     eq("string callback text", Std.string(cstr.callAuto("slen", [fsp, 3])), "4");
 
+    var stub = "";
+    for (mod in Jit.all()) if (StringTools.startsWith(mod.name, "rjitcb_label_")) stub = mod.name;
+    ok("stub module is visible", stub != "", "");
+    Jit.dispose(stub);
+    for (i in 0...4) Jit.tick();
+    eq("stub stays callable after its module is disposed", Std.string(cstr.callAuto("slen", [fsp, 3])), "4");
+    eq("stub address is reused", Std.string(Jit.callback("label", "s(d)") == fsp), "true");
+
+    Jit.bind("ghosted", function(a0:Float, a1:Float, a2:Float, a3:Float):Float return 1.0);
+    var gcb = Jit.compile("cbghost", 'double callghost(double (*f)(double), double v) { return f(v); }');
+    var gp = Jit.callback("ghosted", "d(d)");
+    Jit.unbind("ghosted");
+    JitHost.lastError = "";
+    eq("unbound callback returns zero", Std.string(gcb.callAuto("callghost", [gp, 1])), "0");
+    ok("unbound callback is reported", JitHost.lastError.indexOf("nothing is bound") >= 0, JitHost.lastError);
+
     head("lifecycle and threads");
     var lm = Jit.compile("lifecycle", 'int one() { return 1; }');
     var lf = lm.bind("one");

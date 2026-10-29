@@ -4,9 +4,9 @@
   "license": "MIT",
   "tags": ["cpp", "jit", "native", "windows", "msvc", "runtime", "hot-reload"],
   "description": "Compile and call native C++ from a hxcpp application at runtime.",
-  "version": "0.1.20",
+  "version": "0.1.21",
   "classPath": "src",
-  "releasenote": "beta: a string returning function is callable again instead of being listed as skipped",
+  "releasenote": "beta: a callback stub stays mapped after its module is disposed, and an unbound callback is reported",
   "contributors": ["GengYan0"],
   "dependencies": {}
 }
