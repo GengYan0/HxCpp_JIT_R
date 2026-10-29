@@ -277,6 +277,7 @@ class JitScan {
     var nums = numerics();
     var sts = new Map<String, Bool>();
     if (structs != null) for (st in structs) sts.set(st.name, true);
+    var ens = enumNames(clean);
     var out:Array<JitFnInfo> = [];
     var lines = clean.split("\n");
     var blocked = scopeBlocked(lines);
@@ -326,6 +327,7 @@ class JitScan {
         if (c == "?") {
           var bare = valueType(t);
           if (sts.exists(bare)) c = "t";
+          else if (ens.exists(bare)) c = "i";
           else if (StringTools.endsWith(StringTools.trim(t), "&") && isNumeric(bare, nums)) c = "r";
         }
         if (c == "?") {
@@ -340,9 +342,11 @@ class JitScan {
       if (args.length - strArgs > 6) ok = false;
       if (strArgs > 4) ok = false;
       if (writeBack > 2) ok = false;
+      for (d in defaults) if (!isDefaultLiteral(d)) ok = false;
       var rc = code(ret);
       if (rc == "v" && !isVoid(ret)) ok = false;
       if (rc == "?" && sts.exists(valueType(ret))) rc = "t";
+      if (rc == "?" && ens.exists(valueType(ret))) rc = "i";
       if (rc == "?") ok = false;
       if (rc == "R") ok = false;
       var sig = rc + "(" + args.join("") + ")";
@@ -359,11 +363,12 @@ class JitScan {
     for (s in structs(src)) sts.set(s.name, s);
     var out:Array<JitVarInfo> = [];
     var seen = new Map<String, Bool>();
-    for (line in clean.split("\n")) {
-      var raw = line;
+    var lines = clean.split("\n");
+    var blocked = scopeBlocked(lines);
+    for (li in 0...lines.length) {
+      if (blocked[li]) continue;
+      var raw = lines[li];
       if (raw.length == 0) continue;
-      var lead = raw.substr(0, raw.length - StringTools.ltrim(raw).length);
-      if (lead.length > 0) continue;
       var s = StringTools.trim(raw);
       if (s == "" || s.charAt(0) == "#") continue;
       if (s.indexOf("(") >= 0) continue;
@@ -527,6 +532,29 @@ class JitScan {
     return StringTools.trim(t) == "void";
   }
 
+  static var typeTable:Map<String, String> = null;
+
+  static function typeCodes():Map<String, String> {
+    if (typeTable != null) return typeTable;
+    var m = new Map<String, String>();
+    for (t in ["double"]) m.set(t, "d");
+    for (t in ["float"]) m.set(t, "f");
+    for (t in ["bool"]) m.set(t, "b");
+    for (t in ["char", "signed char", "unsigned char", "int8_t", "uint8_t"]) m.set(t, "c");
+    for (t in ["short", "short int", "signed short", "signed short int", "unsigned short",
+               "unsigned short int", "int16_t", "uint16_t"]) m.set(t, "h");
+    for (t in ["int", "signed", "signed int", "int32_t"]) m.set(t, "i");
+    for (t in ["unsigned", "unsigned int", "uint32_t"]) m.set(t, "u");
+    for (t in ["long long", "long long int", "signed long long", "signed long long int",
+               "unsigned long long", "unsigned long long int", "long long unsigned int",
+               "long", "long int", "signed long", "signed long int",
+               "unsigned long", "unsigned long int",
+               "int64_t", "uint64_t", "size_t", "ssize_t", "ptrdiff_t",
+               "intptr_t", "uintptr_t", "intmax_t", "uintmax_t"]) m.set(t, "l");
+    typeTable = m;
+    return m;
+  }
+
   public static function code(t:String):String {
     var s = trimQualifiers(t);
     while (s.indexOf("  ") >= 0) s = s.split("  ").join(" ");
@@ -542,15 +570,47 @@ class JitScan {
       if (base == "char") return "s";
       return "p";
     }
-    if (s == "double") return "d";
-    if (s == "float") return "f";
-    if (s == "bool") return "b";
-    if (s == "char" || s == "signed char" || s == "unsigned char") return "c";
-    if (s == "short" || s == "short int" || s == "signed short" || s == "unsigned short") return "h";
-    if (s == "unsigned" || s == "unsigned int" || s == "signed int") return "u";
-    if (s == "long long" || s == "unsigned long long" || s == "int64_t" || s == "uint64_t" || s == "long" || s == "unsigned long") return "l";
+    var c = typeCodes().get(s);
+    if (c != null) return c;
     if (isNumeric(s, numerics())) return "i";
     return "?";
+  }
+
+  public static function enumNames(clean:String):Map<String, Bool> {
+    var out = new Map<String, Bool>();
+    for (line in clean.split("\n")) {
+      var t = StringTools.trim(line);
+      var p = 0;
+      while (true) {
+        var k = t.indexOf("enum", p);
+        if (k < 0) break;
+        p = k + 4;
+        if (k > 0 && isIdentChar(t.charCodeAt(k - 1))) continue;
+        if (p < t.length && isIdentChar(t.charCodeAt(p))) continue;
+        var q = p;
+        while (q < t.length && (t.charCodeAt(q) == 32 || t.charCodeAt(q) == 9)) q++;
+        if (StringTools.startsWith(t.substr(q), "class ")) q += 6
+        else if (StringTools.startsWith(t.substr(q), "struct ")) q += 7;
+        var n0 = q;
+        while (q < t.length && isIdentChar(t.charCodeAt(q))) q++;
+        if (q > n0) out.set(t.substring(n0, q), true);
+      }
+    }
+    return out;
+  }
+
+  static function isDefaultLiteral(d:String):Bool {
+    var t = StringTools.trim(d);
+    if (t == "") return true;
+    if (t == "true" || t == "false" || t == "nullptr" || t == "NULL") return true;
+    if (t.length >= 2) {
+      var c = t.charAt(0);
+      if ((c == '"' || c == "'") && t.charAt(t.length - 1) == c) return true;
+    }
+    if (~/^[+-]?0[xX][0-9a-fA-F]+[uUlL]*$/.match(t)) return true;
+    if (~/^[+-]?[0-9]+\.?[0-9]*([eE][+-]?[0-9]+)?[fFuUlL]*$/.match(t)) return true;
+    if (~/^[+-]?\.[0-9]+([eE][+-]?[0-9]+)?[fFuLl]*$/.match(t)) return true;
+    return false;
   }
 
   static function splitArgs(p:String):Array<JitArgText> {
