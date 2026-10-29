@@ -303,6 +303,7 @@ class JitElf {
 
     if (dynPh == null) {
       JitNative.flushIcache(alloc, total);
+      protect(loads, baseF);
       JitLoader.track(img);
       return img;
     }
@@ -418,10 +419,21 @@ class JitElf {
     img.finiArrSize = Std.int(finiArrSz);
 
     JitNative.flushIcache(alloc, total);
+    protect(loads, baseF);
     runInitArray(img.initArr, img.initArrSize);
     if (img.initVa != 0) JitNative.callInit(img.initVa);
     JitLoader.track(img);
     return img;
+  }
+
+  static function protect(loads:Array<ElfPhdr>, baseF:Float):Void {
+    for (ph in loads) {
+      if ((ph.flags & 1) == 0 || (ph.flags & 2) != 0) continue;
+      var start = ph.vaddr - (ph.vaddr % 4096);
+      var end = roundUp(ph.vaddr + ph.memsz, 4096);
+      if (end <= start) continue;
+      JitNative.vprotect(JitNative.toSizeT(baseF + start), Std.int(end - start), 0x20);
+    }
   }
 
   static inline function addrOf(baseF:Float, va:Float):cpp.SizeT {

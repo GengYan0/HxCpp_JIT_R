@@ -283,6 +283,7 @@ class JitLoader {
     if (verbose) Sys.println("[load] tls idx=" + img.tlsIndex);
     parseExports(img);
     if (verbose) Sys.println("[load] exports=" + Lambda.count(img.exports) + " fwd=" + Lambda.count(img.forwarders));
+    protectCode(img);
     if (verbose) Sys.println("[load] calling entry 0x" + StringTools.hex(img.entry, 0));
 
     if (img.entry != 0 && !skipEntry) {
@@ -494,6 +495,19 @@ class JitLoader {
     img.tlsIndex = -1;
   }
 
+  static function protectCode(img:JitImage):Void {
+    for (s in img.sections) {
+      if ((s.chars & 0x20000000) == 0 || (s.chars & 0x80000000) != 0) continue;
+      var len = s.vsize > 0 ? s.vsize : s.rawSize;
+      if (len <= 0) continue;
+      var start = s.va - (s.va % 4096);
+      var end = s.va + len;
+      var pad = end % 4096;
+      if (pad != 0) end += 4096 - pad;
+      JitNative.vprotect(at(img.base, start), end - start, 0x20);
+    }
+  }
+
   static function parseExports(img:JitImage):Void {
     var d = img.dirs[0];
     if (d.rva == 0 || d.size == 0 || d.size < 40) return;
@@ -505,11 +519,15 @@ class JitLoader {
     var addrNames = Std.int(JitNative.peek(at(base, d.rva + 32), 4));
     var addrOrds = Std.int(JitNative.peek(at(base, d.rva + 36), 4));
     if (nNames <= 0 || nNames > 65536 || nFuncs <= 0 || addrNames == 0 || addrFuncs == 0 || addrOrds == 0) return;
+    if (addrNames < 0 || addrOrds < 0 || addrFuncs < 0) return;
+    if (addrNames + nNames * 4 > img.sizeOfImage || addrOrds + nNames * 2 > img.sizeOfImage) return;
+    if (addrFuncs + nFuncs * 4 > img.sizeOfImage) return;
     for (i in 0...nNames) {
       var nameRva = Std.int(JitNative.peek(at(base, addrNames + i * 4), 4));
       var ord = Std.int(JitNative.peek(at(base, addrOrds + i * 2), 2));
       if (ord < 0 || ord >= nFuncs) continue;
       var fnRva = Std.int(JitNative.peek(at(base, addrFuncs + ord * 4), 4));
+      if (nameRva <= 0 || nameRva >= img.sizeOfImage || fnRva < 0 || fnRva >= img.sizeOfImage) continue;
       if (nameRva == 0 || fnRva == 0) continue;
       var nm = readStr(base, nameRva, 256);
       if (nm == "") continue;
