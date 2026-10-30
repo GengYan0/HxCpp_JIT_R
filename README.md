@@ -253,6 +253,7 @@ The standard library, inline assembly, SIMD intrinsics and templates all work. T
 |---|---|
 | `eval(code):Bool` | Append source and rebuild; keeps the previous module on failure |
 | `evalFile(path)` / `redeclare(code)` | Append from file / replace everything |
+| `evalNum(code):Float` | Evaluate a C++ expression against the session source; the expression is not kept |
 | `call(fn, args, ?strs)` | Call a function |
 | `get(path)` / `set(path, v)` | Read or write any supported path |
 | `snapshot()` / `restore(vals)` | Manual state save and restore |
@@ -679,6 +680,8 @@ s.call("heal", [5]);          // 90
 
 Each `eval` is a full rebuild. State is read before compiling and written back after loading.
 
+`evalNum` compiles the session source once more with the expression wrapped in a function and returns its value; the wrapper is not added to the source, so the next `eval` starts from what the session holds. It is a rebuild, not a calculator, so call it for a value that is not worth a `call` of its own.
+
 ### File watch
 
 ```haxe
@@ -779,12 +782,17 @@ The `l` row covers `long long`, `long`, `size_t`, `ptrdiff_t`, `intptr_t`, `uint
 ```haxe
 var m = Jit.compile("wide", '
 long long scaled(long long v, int factor = 3) { return v * factor; }
-unsigned long long hash(const char* s, unsigned long long seed);
+unsigned long long fnv(const char* s, unsigned long long seed) {
+  unsigned long long h = seed;
+  for (int i = 0; s[i]; i++) h = h * 1099511628211ULL + (unsigned char)s[i];
+  return h;
+}
 ');
 
-m.callWide("scaled", [haxe.Int64.make(0x00200000, 1)]);        // the default fills factor
-m.callWide("hash", [seed], [], ["abc"]);                       // a string argument as usual
-m.callWideSig("scaled", "l(li)", [seed], [5]);                 // pick an overload by signature
+var seed = haxe.Int64.make(0xcbf29ce4, 0x84222325);
+m.callWide("scaled", [haxe.Int64.make(0x00200000, 1)]);   // the default fills factor
+m.callWide("fnv", [seed], [], ["abc"]);                   // a string argument as usual
+m.callWideSig("scaled", "l(li)", [seed], [5]);            // pick an overload by signature
 ```
 
 `callWide` takes the `l` arguments in order, then the other numbers, then the strings, and fills a trailing argument from its declaration. A count that matches no signature, an overload that several signatures fit, a text argument without a default, and a result that is not numeric all report through `JitHost.error` and return zero.
@@ -886,7 +894,7 @@ Time goes into compiler process startup and linking, not into the amount of code
 
 ## Testing
 
-`test/` is a standalone console project with 499 assertions.
+`test/` is a standalone console project with 503 assertions.
 
 `example/` is a two file project that compiles a module and calls it:
 

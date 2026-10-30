@@ -136,7 +136,17 @@ RJIT(d) { return 4; }
     eq("session var bridge", Std.string(s.call("c")), "77");
     ok("session redeclare", s.redeclare("RJIT(a) { return 99; }"));
     eq("session a redeclared", Std.string(s.call("a")), "99");
+    ok("session keeps a global for an expression", s.eval("int gs = 21;"));
+    eq("session expression sees the source", Std.string(s.evalNum("gs * 2")), "42");
+    ok("an expression leaves the source alone", s.source.indexOf("__sess") < 0, s.source);
     s.dispose();
+
+    if (JitPlatform.win) {
+      var before = (Sys.getEnv("PATH") ?? "").split(";").length;
+      hxcpp_jit_r.JitToolchain.detect().apply();
+      var after = (Sys.getEnv("PATH") ?? "").split(";").length;
+      eq("a second apply does not extend PATH", Std.string(after), Std.string(before));
+    }
 
     head("parallel compile gate");
     var prevMax = Jit.maxParallel;

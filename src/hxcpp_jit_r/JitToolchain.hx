@@ -24,7 +24,15 @@ class JitToolchain {
     if (!JitPlatform.win) return;
     if (inc.length > 0) Sys.putEnv("INCLUDE", inc.join(";"));
     if (lib.length > 0) Sys.putEnv("LIB", lib.join(";"));
-    if (bin.length > 0) Sys.putEnv("PATH", bin.join(";") + ";" + (Sys.getEnv("PATH") ?? ""));
+    var cur = Sys.getEnv("PATH") ?? "";
+    var have = splitEnv(cur);
+    var add:Array<String> = [];
+    for (d in bin) {
+      var nd = normalize(d);
+      if (nd == "" || have.indexOf(nd) >= 0 || add.indexOf(nd) >= 0) continue;
+      add.push(nd);
+    }
+    if (add.length > 0) Sys.putEnv("PATH", add.join(";") + ";" + cur);
     Sys.putEnv("VSLANG", "1033");
   }
 

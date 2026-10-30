@@ -28,7 +28,9 @@ class JitSession {
   }
 
   public function evalNum(code:String):Float {
-    return Jit.eval(code);
+    var full = source + "\nRJIT(__sess) { return (" + code + "); }\n";
+    if (!rebuild(full)) return Math.NaN;
+    return module.call("__sess");
   }
 
   public function redeclare(code:String):Bool {
@@ -36,6 +38,12 @@ class JitSession {
   }
 
   function run(full:String):Bool {
+    if (!rebuild(full)) return false;
+    source = full;
+    return true;
+  }
+
+  function rebuild(full:String):Bool {
     var keep = snapshot();
     var m = Jit.compile(name, full, {force: true});
     diag = m.diag;
@@ -43,7 +51,6 @@ class JitSession {
       lastError = m.diag.length > 0 ? JitCompiler.describe(m.diag[0]) : "compile failed";
       return false;
     }
-    source = full;
     module = m;
     restore(keep);
     evals++;
