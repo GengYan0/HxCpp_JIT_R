@@ -1145,6 +1145,7 @@ long long big64() { return 9007199254740993LL; }
 unsigned long long mix64(const char* s, unsigned long long seed) { unsigned long long h = seed; for (int i = 0; s[i]; i++) h = h * 1099511628211ULL + (unsigned char)s[i]; return h; }
 long long plain(long long a) { return a; }
 int smallw(int v) { return v + 1; }
+long long hexd(long long a, int b = 0x20) { return a + b; }
 long long withd(long long a, int b = 7) { return a + b; }
 long long wlen(const std::string& s, long long k) { return (long long)s.size() + k; }
 long long ovl(long long a, int b) { return a + b; }
@@ -1162,6 +1163,7 @@ long long ovl(int a, long long b) { return a * 1000 + b; }
     ok("a wide seed keeps its low bits", h1 != h2, h1 + " vs " + h2);
     eq("the numeric path is unchanged", Std.string(wm.callAuto("plain", [7])), "7");
     eq("a non wide result converts", wideStr(wm.callWide("smallw", [], [41])), "0:42");
+    eq("a hex default is read as hex", wideStr(wm.callWide("hexd", [haxe.Int64.ofInt(1)])), "0:33");
     JitHost.lastError = "";
     eq("an unknown name returns zero", wideStr(wm.callWide("nosuch", [])), "0:0");
     ok("an unknown name is reported", JitHost.lastError.indexOf("no function of that name") >= 0, JitHost.lastError);

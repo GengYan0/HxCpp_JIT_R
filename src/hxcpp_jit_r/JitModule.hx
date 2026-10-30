@@ -908,23 +908,21 @@ class JitModule {
     if (s == "false") return 0.0;
     if (s.length == 3 && s.charAt(0) == "'" && s.charAt(2) == "'") return s.charCodeAt(1);
     if (s.charAt(0) == '"' || s.charAt(0) == '\'') return null;
-    while (s.length > 0 && "fFuUlL".indexOf(s.charAt(s.length - 1)) >= 0) s = s.substr(0, s.length - 1);
-    if (s == "") return null;
     var neg = false;
     if (s.charAt(0) == "-") {
       neg = true;
       s = s.substr(1);
     } else if (s.charAt(0) == "+") s = s.substr(1);
     if (StringTools.startsWith(s, "0x") || StringTools.startsWith(s, "0X")) {
+      var n = 2;
+      while (n < s.length && "0123456789abcdefABCDEF".indexOf(s.charAt(n)) >= 0) n++;
+      if (n == 2) return null;
       var v = 0.0;
-      for (i in 2...s.length) {
-        var c = s.charAt(i);
-        var d = "0123456789abcdef".indexOf(c.toLowerCase());
-        if (d < 0) return null;
-        v = v * 16.0 + d;
-      }
+      for (i in 2...n) v = v * 16.0 + "0123456789abcdef".indexOf(s.charAt(i).toLowerCase());
       return neg ? -v : v;
     }
+    while (s.length > 0 && "fFuUlL".indexOf(s.charAt(s.length - 1)) >= 0) s = s.substr(0, s.length - 1);
+    if (s == "") return null;
     var f = Std.parseFloat(s);
     if (Math.isNaN(f)) return null;
     return neg ? -f : f;

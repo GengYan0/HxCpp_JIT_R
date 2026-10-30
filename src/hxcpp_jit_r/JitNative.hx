@@ -35,8 +35,10 @@ static double rjit_nan(void) {
   return d;
 }
 
+static const unsigned long long rjit_fault_bits = 0x7FF80000DEAD0001ULL;
+
 static double rjit_fault(void) {
-  unsigned long long bits = 0x7FF80000DEAD0001ULL;
+  unsigned long long bits = rjit_fault_bits;
   double d;
   memcpy(&d, &bits, sizeof(d));
   return d;
@@ -989,7 +991,7 @@ class JitNative {
   @:functionCode('
     unsigned long long b = 0;
     memcpy(&b, &v0, 8);
-    return b == 0x7FF80000DEAD0001ULL ? 1 : 0;
+    return b == rjit_fault_bits ? 1 : 0;
   ')
   public static function isFault(v0:Float):Int return 0;
 
