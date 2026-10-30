@@ -788,7 +788,7 @@ m.callWideSig("scaled", "l(li)", [seed], [5]);                 // pick an overlo
 
 `callWide` takes the `l` arguments in order, then the other numbers, then the strings, and fills a trailing argument from its declaration. A count that matches no signature, an overload that several signatures fit, a text argument without a default, and a result that is not numeric all report through `JitHost.error` and return zero.
 
-A function of a second translation unit is reachable the same way. When only the signature is known, `callWideSig(name, sig, ...)` builds the call from the signature text alone, which is what `Jit.compile(..., {sigs: [...]})` needs.
+A function of a second translation unit is reachable the same way. `callWideSig(name, sig, ...)` names the signature when two overloads fit the counts; a name or a signature the module does not carry is reported rather than called.
 
 ```haxe
 m.signature("clamp");            // "d(ddd)"

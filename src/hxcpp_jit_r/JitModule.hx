@@ -749,7 +749,7 @@ class JitModule {
     var ss = strs == null ? [] : strs;
     var f = pickWide(n, ws.length, ns.length, ss.length);
     if (f == null) {
-      if (fns.get(n) == null) return wideFail(n, "the module has no function of that name, use callWideSig for a name from another unit");
+      if (fns.get(n) == null) return wideFail(n, "the module has no function of that name");
       return wideFail(n, "no signature fits " + ws.length + " 64 bit, " + ns.length + " numeric and " + ss.length + " string arguments, use callWideSig when overloads fit the same counts");
     }
     return callWideSig(n, f.sig, ws, ns, ss);
@@ -764,22 +764,13 @@ class JitModule {
       return haxe.Int64.ofInt(0);
     }
     var f = bySig.get(n + "|" + sig);
-    var kinds:Array<String> = [];
-    var defs:Array<String> = null;
-    var ret = sig.charAt(0);
-    if (f != null) {
-      if (!f.callable) return wideFail(n, "signature " + sig + " is not callable");
-      kinds = f.args;
-      defs = f.defaults;
-      ret = f.ret;
-    } else {
-      var p = sig.indexOf("(");
-      if (p <= 0 || sig.charAt(sig.length - 1) != ")") return wideFail(n, "signature " + sig + " cannot be read");
-      for (i in p + 1...sig.length - 1) kinds.push(sig.charAt(i));
-    }
-    if (ret == "S" || ret == "t" || ret == "R" || ret == "v") return wideFail(n, "a " + ret + " result does not fit an Int64, use the ordinary call");
-    var d:cpp.SizeT = 0;
-    if (f != null) d = resolve(JitCodegen.wideNameOf(f));
+    if (f == null) return wideFail(n, "the module has no function " + n + " with signature " + sig);
+    if (!f.callable) return wideFail(n, "signature " + sig + " is not callable");
+    if (f.ret == "S" || f.ret == "t" || f.ret == "R" || f.ret == "v") return wideFail(n, "a " + f.ret + " result does not fit an Int64, use the ordinary call");
+    var kinds = f.args;
+    var defs = f.defaults;
+    var ret = f.ret;
+    var d:cpp.SizeT = resolve(JitCodegen.wideNameOf(f));
     if (d == 0) d = resolve(JitCodegen.wideDispName(sig));
     if (d == 0) return wideFail(n, "no wide entry point for " + sig);
     var fp = ptrOf(n, sig);
@@ -795,19 +786,19 @@ class JitModule {
     var bad = "";
     for (i in 0...kinds.length) {
       var c = kinds[i];
-      var def = defs == null ? "" : defs[i];
+      var def = defs[i];
       if (c == "l") {
         var v:haxe.Int64;
         if (wi < ws.length) {
           v = ws[wi];
           wi++;
         } else {
-          var dv = defaultNumber(def);
+          var dv = defaultWide(def);
           if (dv == null) {
             bad = "argument " + i + " is 64 bit and has no default";
             break;
           }
-          v = haxe.Int64.fromFloat(dv);
+          v = dv;
         }
         slots.push(JitNative.bitsOf64(v.low, v.high));
       } else if (c == "s" || c == "S" || c == "R" || c == "W") {
@@ -828,7 +819,7 @@ class JitModule {
           nv = ns[ni];
           ni++;
         } else {
-          nv = defs == null ? null : defaultNumber(def);
+          nv = defaultNumber(def);
           if (nv == null) {
             bad = "argument " + i + " has no default";
             break;
@@ -906,6 +897,7 @@ class JitModule {
     if (s == "") return null;
     if (s == "true") return 1.0;
     if (s == "false") return 0.0;
+    if (s == "nullptr" || s == "NULL") return 0.0;
     if (s.length == 3 && s.charAt(0) == "'" && s.charAt(2) == "'") return s.charCodeAt(1);
     if (s.charAt(0) == '"' || s.charAt(0) == '\'') return null;
     var neg = false;
@@ -926,6 +918,32 @@ class JitModule {
     var f = Std.parseFloat(s);
     if (Math.isNaN(f)) return null;
     return neg ? -f : f;
+  }
+
+  public static function defaultWide(t:String):Null<haxe.Int64> {
+    if (t == null) return null;
+    var s = StringTools.trim(t);
+    if (s == "") return null;
+    if (s == "true") return haxe.Int64.ofInt(1);
+    if (s == "false") return haxe.Int64.ofInt(0);
+    var neg = false;
+    if (s.charAt(0) == "-") {
+      neg = true;
+      s = s.substr(1);
+    } else if (s.charAt(0) == "+") s = s.substr(1);
+    var hex = StringTools.startsWith(s, "0x") || StringTools.startsWith(s, "0X");
+    var i0 = hex ? 2 : 0;
+    var base = haxe.Int64.ofInt(hex ? 16 : 10);
+    var v = haxe.Int64.ofInt(0);
+    var any = false;
+    for (i in i0...s.length) {
+      var d = "0123456789abcdef".indexOf(s.charAt(i).toLowerCase());
+      if (d < 0 || d >= (hex ? 16 : 10)) break;
+      v = v * base + haxe.Int64.ofInt(d);
+      any = true;
+    }
+    if (!any) return null;
+    return neg ? -v : v;
   }
 
   public static function defaultText(t:String):Null<String> {

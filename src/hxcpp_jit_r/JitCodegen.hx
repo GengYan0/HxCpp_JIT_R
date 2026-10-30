@@ -78,7 +78,6 @@ class JitCodegen {
         used = true;
         if (s.indexOf("S") >= 0) needString = true;
         b.add(dispatcher(s));
-        b.add(dispatcher(s, true));
       }
     }
 

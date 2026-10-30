@@ -1169,7 +1169,7 @@ long long ovl(int a, long long b) { return a * 1000 + b; }
     ok("an unknown name is reported", JitHost.lastError.indexOf("no function of that name") >= 0, JitHost.lastError);
     JitHost.lastError = "";
     eq("an unreadable signature returns zero", wideStr(wm.callWideSig("add64", "lbroke", [])), "0:0");
-    ok("an unreadable signature is reported", JitHost.lastError.indexOf("cannot be read") >= 0, JitHost.lastError);
+    ok("an unknown signature is reported", JitHost.lastError.indexOf("with signature") >= 0, JitHost.lastError);
     eq("a default fills a wide call", wideStr(wm.callWide("withd", [haxe.Int64.ofInt(5)])), "0:12");
     eq("a struct argument gets a wide entry", wideStr(wm.callWide("wlen", [haxe.Int64.ofInt(10)], [], ["abcd"])), "0:14");
     JitHost.lastError = "";
