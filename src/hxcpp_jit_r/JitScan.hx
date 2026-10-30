@@ -237,8 +237,24 @@ class JitScan {
       }
       out.push(bad);
       var segStart = 0;
-      for (j in 0...line.length) {
+      var quote = 0;
+      var j = 0;
+      while (j < line.length) {
         var ch = line.charCodeAt(j);
+        if (quote != 0) {
+          if (ch == 92) {
+            j += 2;
+            continue;
+          }
+          if (ch == quote) quote = 0;
+          j++;
+          continue;
+        }
+        if (ch == 34 || ch == 39) {
+          quote = ch;
+          j++;
+          continue;
+        }
         if (ch == 123) {
           stack.push(!transparentScope(StringTools.trim(line.substring(segStart, j))));
           segStart = j + 1;
@@ -246,6 +262,7 @@ class JitScan {
           if (stack.length > 0) stack.pop();
           segStart = j + 1;
         } else if (ch == 59) segStart = j + 1;
+        j++;
       }
     }
     return out;

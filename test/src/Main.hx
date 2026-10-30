@@ -977,6 +977,8 @@ double alive() { return counter + hits[1]; }
     eq("allman and namespace scanned", [for (f in allman) f.name].join(","), "ind");
     var raw = JitScan.functions('const char* s = R"(a"b)";\nint after_raw(double v) { return (int)v; }\n');
     eq("raw string keeps the scanner in sync", [for (f in raw) f.name].join(","), "after_raw");
+    var qb = JitScan.functions('const char* s = "a{b";\nchar c = \'{\';\nint afterbrace() { return 1; }\n');
+    eq("a brace inside a literal does not open a scope", [for (f in qb) f.name].join(","), "afterbrace");
     eq("signed long long is wide", JitScan.code("signed long long"), "l");
     eq("signed long is wide", JitScan.code("signed long"), "l");
     eq("signed int is signed", JitScan.code("signed int"), "i");
@@ -1151,6 +1153,7 @@ unsigned long long mix64(const char* s, unsigned long long seed) { unsigned long
 long long plain(long long a) { return a; }
 int smallw(int v) { return v + 1; }
 long long hexd(long long a, int b = 0x20) { return a + b; }
+long long gl = 0;
 long long withd(long long a, int b = 7) { return a + b; }
 long long wlen(const std::string& s, long long k) { return (long long)s.size() + k; }
 long long ovl(long long a, int b) { return a + b; }
@@ -1169,6 +1172,9 @@ long long ovl(int a, long long b) { return a * 1000 + b; }
     eq("the numeric path is unchanged", Std.string(wm.callAuto("plain", [7])), "7");
     eq("a non wide result converts", wideStr(wm.callWide("smallw", [], [41])), "0:42");
     eq("a hex default is read as hex", wideStr(wm.callWide("hexd", [haxe.Int64.ofInt(1)])), "0:33");
+    ok("a wide global is written", wm.setVarWide("gl", p53), "");
+    eq("a wide global reads back exactly", wideStr(wm.getVarWide("gl")), "2097152:1");
+    ok("the plain read keeps a rounded value", wm.getVar("gl") == 9007199254740992.0, Std.string(wm.getVar("gl")));
     JitHost.lastError = "";
     eq("an unknown name returns zero", wideStr(wm.callWide("nosuch", [])), "0:0");
     ok("an unknown name is reported", JitHost.lastError.indexOf("no function of that name") >= 0, JitHost.lastError);

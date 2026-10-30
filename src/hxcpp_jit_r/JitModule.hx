@@ -249,6 +249,24 @@ class JitModule {
     return JitNative.invoke(p, ctx, 0, 0, 0, 0, 0, 0, 0);
   }
 
+  public function getVarWide(n:String):haxe.Int64 {
+    var v = vars.get(n);
+    if (v == null || handle == 0 || v.kind != "num") return haxe.Int64.ofInt(0);
+    var p = resolve("rjit_getvw_" + n);
+    if (p == 0) return haxe.Int64.ofInt(0);
+    var r = JitNative.invoke(p, ctx, 0, 0, 0, 0, 0, 0, 0);
+    return haxe.Int64.make(JitNative.hiOf64(r), JitNative.loOf64(r));
+  }
+
+  public function setVarWide(n:String, v:haxe.Int64):Bool {
+    var info = vars.get(n);
+    if (info == null || info.isConst || handle == 0 || info.kind != "num") return false;
+    var p = resolve("rjit_setvw_" + n);
+    if (p == 0) return false;
+    JitNative.invoke(p, ctx, 1, JitNative.bitsOf64(v.low, v.high), 0, 0, 0, 0, 0);
+    return true;
+  }
+
   public function setVar(n:String, v:Float):Bool {
     var info = vars.get(n);
     if (info == null || info.isConst || handle == 0 || (info.kind != "num" && info.kind != "ptr")) return false;

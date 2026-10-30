@@ -212,6 +212,7 @@ The standard library, inline assembly, SIMD intrinsics and templates all work. T
 | `image.codePages` | Executable pages switched to read and execute after the image was mapped |
 | `addrOf(name)` | Address of a variable |
 | `getVar` / `setVar` | Top-level numeric and pointer variables |
+| `getVarWide` / `setVarWide` | A 64 bit global as an `Int64`, whole |
 | `getField` / `setField` / `getIndex` / `setIndex` | Explicit access |
 | `getFieldPath` / `setFieldPath` / `getElemField` / `setElemField` | Nested paths and struct array elements |
 | `readDoubles` / `writeDoubles` / `readInts` / `writeInts` | Bulk array transfer |
@@ -851,6 +852,7 @@ Time goes into compiler process startup and linking, not into the amount of code
 - A function returning `std::string` by reference is listed in `module.skipped`; return by value instead
 - A template function, or one whose return type is `auto`, is also listed in `module.skipped`; the type system cannot call it
 - A 64 bit integer keeps 53 bits on the ordinary call path; `callWide` carries all 64, for arguments and results
+- A 64 bit global read with `getVar` keeps 53 bits as well; `getVarWide` and `setVarWide` carry all 64, and a session snapshot of such a variable is the rounded one
 - `callWide` is meant for a function that returns one of the 64 bit types; any other numeric return is converted to `Int64`, and a string, struct or `void` return is refused with a message
 - A name the module does not carry returns zero from `callAuto`, `call` and `callWide`; `has(name)` and `fnNames()` tell whether it exists
 - A default argument must be a literal, such as a number, a quoted string, `true`, `false` or `nullptr`; a name from a header puts the function in `module.skipped`
@@ -884,7 +886,7 @@ Time goes into compiler process startup and linking, not into the amount of code
 
 ## Testing
 
-`test/` is a standalone console project with 495 assertions.
+`test/` is a standalone console project with 499 assertions.
 
 `example/` is a two file project that compiles a module and calls it:
 
