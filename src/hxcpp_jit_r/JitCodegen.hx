@@ -13,7 +13,7 @@ typedef JitLeaf = {
 }
 
 class JitCodegen {
-  public static inline var BUILD:Int = 32;
+  public static inline var BUILD:Int = 34;
   public static inline var MAX_DEPTH:Int = 3;
 
   public static function emit(fns:Array<JitFnInfo>, vars:Array<JitVarInfo>, extra:Array<String> = null, structs:Array<JitStructInfo> = null, externs:Array<String> = null):String {
@@ -62,13 +62,11 @@ class JitCodegen {
       }
       if (needsCustom(f)) {
         b.add(dispatcherFor(f));
+        if (f.sig.indexOf("l") >= 0) b.add(dispatcherFor(f, true));
       } else if (!sigs.exists(f.sig)) {
         sigs.set(f.sig, true);
         b.add(dispatcher(f.sig));
-      }
-      if (f.sig.indexOf("l") >= 0) {
-        if (f.sig.indexOf("S") >= 0) needString = true;
-        b.add(dispatcherFor(f, true));
+        b.add(dispatcher(f.sig, true));
       }
     }
 
@@ -80,6 +78,7 @@ class JitCodegen {
         used = true;
         if (s.indexOf("S") >= 0) needString = true;
         b.add(dispatcher(s));
+        b.add(dispatcher(s, true));
       }
     }
 
@@ -267,7 +266,7 @@ class JitCodegen {
     var body = "((" + fnty + ")f)(" + expr.join(", ") + ")";
     var call = ret == "v"
       ? body + "; return 0.0;"
-      : (wide && (ret == "l" || ret == "u") ? "return rjit_i64_bits(" + body + ");" : "return " + retCast(ret) + body + ";");
+      : (wide && ret == "l" ? "return rjit_i64_bits(" + body + ");" : "return " + retCast(ret) + body + ";");
     return 'extern "C" RJIT_API double ' + name + '(RJitCtx* ctx, void* f, RJitArgs* a) { try { ' + call + ' } catch (const std::exception& e) { RJIT_ERRN(e.what(), (int)strlen(e.what())); return rjit_nan_val(); } catch (...) { return rjit_nan_val(); } }' + "\n";
   }
 

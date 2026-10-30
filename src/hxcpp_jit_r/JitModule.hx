@@ -749,30 +749,41 @@ class JitModule {
     var ss = strs == null ? [] : strs;
     var f = pickWide(n, ws.length, ns.length, ss.length);
     if (f == null) {
-      JitHost.error("callWide", n, "no signature fits " + ws.length + " 64 bit, " + ns.length + " numeric and " + ss.length + " string arguments, use callWideSig when overloads fit the same counts");
-      return haxe.Int64.ofInt(0);
+      if (fns.get(n) == null) return wideFail(n, "the module has no function of that name, use callWideSig for a name from another unit");
+      return wideFail(n, "no signature fits " + ws.length + " 64 bit, " + ns.length + " numeric and " + ss.length + " string arguments, use callWideSig when overloads fit the same counts");
     }
     return callWideSig(n, f.sig, ws, ns, ss);
   }
 
   public function callWideSig(n:String, sig:String, wide:Array<haxe.Int64>, ?nums:Array<Float>, ?strs:Array<String>):haxe.Int64 {
+    if (poisoned) {
+      if (!poisonReported) {
+        poisonReported = true;
+        JitHost.error("callWide", n, "the module faulted earlier and was not repaired, reload it");
+      }
+      return haxe.Int64.ofInt(0);
+    }
     var f = bySig.get(n + "|" + sig);
-    if (f == null) f = fns.get(n);
-    if (f == null || !f.callable || handle == 0) {
-      JitHost.error("callWide", n, "signature " + sig + " is not callable");
-      return haxe.Int64.ofInt(0);
+    var kinds:Array<String> = [];
+    var defs:Array<String> = null;
+    var ret = sig.charAt(0);
+    if (f != null) {
+      if (!f.callable) return wideFail(n, "signature " + sig + " is not callable");
+      kinds = f.args;
+      defs = f.defaults;
+      ret = f.ret;
+    } else {
+      var p = sig.indexOf("(");
+      if (p <= 0 || sig.charAt(sig.length - 1) != ")") return wideFail(n, "signature " + sig + " cannot be read");
+      for (i in p + 1...sig.length - 1) kinds.push(sig.charAt(i));
     }
-    if (f.ret == "S" || f.ret == "t" || f.ret == "R" || f.ret == "v") {
-      JitHost.error("callWide", n, "a " + f.ret + " result does not fit an Int64");
-      return haxe.Int64.ofInt(0);
-    }
-    var fp = ptrOf(n, f.sig);
-    if (fp == 0) fp = resolve("rjit_ptr_" + n);
-    var d = resolve(JitCodegen.wideNameOf(f));
-    if (fp == 0 || d == 0) {
-      JitHost.error("callWide", n, "no wide entry point was generated for " + f.sig);
-      return haxe.Int64.ofInt(0);
-    }
+    if (ret == "S" || ret == "t" || ret == "R" || ret == "v") return wideFail(n, "a " + ret + " result does not fit an Int64, use the ordinary call");
+    var d:cpp.SizeT = 0;
+    if (f != null) d = resolve(JitCodegen.wideNameOf(f));
+    if (d == 0) d = resolve(JitCodegen.wideDispName(sig));
+    if (d == 0) return wideFail(n, "no wide entry point for " + sig);
+    var fp = ptrOf(n, sig);
+    if (fp == 0) return wideFail(n, "no symbol named " + n);
     var ws = wide == null ? [] : wide;
     var ns = nums == null ? [] : nums;
     var ss = strs == null ? [] : strs;
@@ -782,9 +793,9 @@ class JitModule {
     var ni = 0;
     var si = 0;
     var bad = "";
-    for (i in 0...f.args.length) {
-      var c = f.args[i];
-      var def = f.defaults[i];
+    for (i in 0...kinds.length) {
+      var c = kinds[i];
+      var def = defs == null ? "" : defs[i];
       if (c == "l") {
         var v:haxe.Int64;
         if (wi < ws.length) {
@@ -817,7 +828,7 @@ class JitModule {
           nv = ns[ni];
           ni++;
         } else {
-          nv = defaultNumber(def);
+          nv = defs == null ? null : defaultNumber(def);
           if (nv == null) {
             bad = "argument " + i + " has no default";
             break;
@@ -831,12 +842,9 @@ class JitModule {
       else if (ni < ns.length) bad = "too many numeric arguments";
       else if (si < ss.length) bad = "too many string arguments";
     }
-    if (bad != "") {
-      JitHost.error("callWide", n, bad);
-      return haxe.Int64.ofInt(0);
-    }
+    if (bad != "") return wideFail(n, bad);
     calls++;
-    var r = texts.length > 0 || usesStr(f.sig)
+    var r = texts.length > 0 || usesStr(sig)
       ? JitNative.callViaB(d, fp, ctx, slots.length, a(slots, 0), a(slots, 1), a(slots, 2), a(slots, 3), a(slots, 4), a(slots, 5),
           bytesOf(texts, 0), bytesOf(texts, 1), bytesOf(texts, 2), bytesOf(texts, 3))
       : JitNative.callVia(d, fp, ctx, slots.length, a(slots, 0), a(slots, 1), a(slots, 2), a(slots, 3), a(slots, 4), a(slots, 5));
@@ -849,8 +857,13 @@ class JitModule {
       }
       return haxe.Int64.ofInt(0);
     }
-    if (f.ret == "l") return haxe.Int64.make(JitNative.hiOf64(r), JitNative.loOf64(r));
+    if (ret == "l") return haxe.Int64.make(JitNative.hiOf64(r), JitNative.loOf64(r));
     return haxe.Int64.fromFloat(r);
+  }
+
+  function wideFail(n:String, msg:String):haxe.Int64 {
+    JitHost.error("callWide", n, msg);
+    return haxe.Int64.ofInt(0);
   }
 
   function pickWide(n:String, wc:Int, nc:Int, sc:Int):JitFnInfo {

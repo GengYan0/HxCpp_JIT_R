@@ -1,6 +1,6 @@
 # HxCpp_JIT_R
 
-0.5.0
+0.5.1
 
 Compile and call native C++ while your application is running. Hand it a source string, get a module back, call its functions like any Haxe method.
 
@@ -773,7 +773,7 @@ if (!m.ok) {
 
 Signatures use `returnCode(argumentCodes)`: `d(dd)`, `i(is)`, `i(SS)`, `S(S)`, `v()`.
 
-The `l` row covers `long long`, `long`, `size_t`, `ptrdiff_t`, `intptr_t`, `uintptr_t`, `int64_t` and `uint64_t`, with or without a `signed` or `unsigned` prefix. Their values cross the numeric slots as doubles, so the ordinary call path keeps 53 bits; `callWide` passes the full 64 and returns an `Int64`.
+The `l` row covers `long long`, `long`, `size_t`, `ptrdiff_t`, `intptr_t`, `uintptr_t`, `int64_t` and `uint64_t`, with or without a `signed` or `unsigned` prefix. `long` is 32 bits on Windows and 64 on Linux and macOS, and the scanner reads it as 64 everywhere because widening is safe; the value still truncates at the call on Windows, exactly as it does in C++. Their values cross the numeric slots as doubles, so the ordinary call path keeps 53 bits; `callWide` passes the full 64 and returns an `Int64`.
 
 ```haxe
 var m = Jit.compile("wide", '
@@ -787,6 +787,8 @@ m.callWideSig("scaled", "l(li)", [seed], [5]);                 // pick an overlo
 ```
 
 `callWide` takes the `l` arguments in order, then the other numbers, then the strings, and fills a trailing argument from its declaration. A count that matches no signature, an overload that several signatures fit, a text argument without a default, and a result that is not numeric all report through `JitHost.error` and return zero.
+
+A function of a second translation unit is reachable the same way. When only the signature is known, `callWideSig(name, sig, ...)` builds the call from the signature text alone, which is what `Jit.compile(..., {sigs: [...]})` needs.
 
 ```haxe
 m.signature("clamp");            // "d(ddd)"
@@ -849,6 +851,8 @@ Time goes into compiler process startup and linking, not into the amount of code
 - A function returning `std::string` by reference is listed in `module.skipped`; return by value instead
 - A template function, or one whose return type is `auto`, is also listed in `module.skipped`; the type system cannot call it
 - A 64 bit integer keeps 53 bits on the ordinary call path; `callWide` carries all 64, for arguments and results
+- `callWide` is meant for a function that returns one of the 64 bit types; any other numeric return is converted to `Int64`, and a string, struct or `void` return is refused with a message
+- A name the module does not carry returns zero from `callAuto`, `call` and `callWide`; `has(name)` and `fnNames()` tell whether it exists
 - A default argument must be a literal, such as a number, a quoted string, `true`, `false` or `nullptr`; a name from a header puts the function in `module.skipped`
 - An enum type is read as an `int`, for arguments and returns
 - `JitNative.peek` and `JitNative.poke` take any address and no check stands between them and the process 
@@ -880,7 +884,7 @@ Time goes into compiler process startup and linking, not into the amount of code
 
 ## Testing
 
-`test/` is a standalone console project with 485 assertions.
+`test/` is a standalone console project with 491 assertions.
 
 `example/` is a two file project that compiles a module and calls it:
 

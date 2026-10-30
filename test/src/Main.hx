@@ -869,13 +869,14 @@ double pick1(double a, double b) { return a * b; }
     if (!sys.FileSystem.exists(mdir)) sys.FileSystem.createDirectory(mdir);
     sys.io.File.saveContent(mdir + "/shared.h", "inline double sq(double v) { return v * v; }\n");
     sys.io.File.saveContent(mdir + "/main.cpp", "#include \"shared.h\"\ndouble quad(double v) { return sq(v) * 2; }\n");
-    sys.io.File.saveContent(mdir + "/extra.cpp", "#include \"shared.h\"\ndouble twice(double v) { return v * 2; }\ndouble quadplus(double v) { return sq(v) * 2 + 1; }\n");
+    sys.io.File.saveContent(mdir + "/extra.cpp", "#include \"shared.h\"\ndouble twice(double v) { return v * 2; }\ndouble quadplus(double v) { return sq(v) * 2 + 1; }\nlong long triple(long long v) { return v * 3; }\n");
     var mm = Jit.compileFiles("multi", mdir + "/main.cpp", [mdir + "/extra.cpp"], {includes: [mdir]});
     ok("multi file compiles", mm.ok, mm.diag.length > 0 ? JitCompiler.describe(mm.diag[0]) + " | " + mm.log : mm.log);
     eq("main unit with local include", Std.string(mm.callAuto("quad", [3])), "18");
     eq("linked unit exported", Std.string(mm.callAuto("twice", [4])), "8");
     eq("linked unit with include", Std.string(mm.callAuto("quadplus", [3])), "19");
     ok("multi file lists both", mm.fnNames().indexOf("twice") >= 0 && mm.fnNames().indexOf("quad") >= 0, mm.fnNames().join(","));
+    eq("a wide call reaches the linked unit", mm.callWide("triple", [haxe.Int64.ofInt(5)]).low + "", "15");
     var rm = Jit.reload("multi");
     ok("multi file reload keeps units", rm != null && rm.ok && rm.callAuto("twice", [5]) == 10, rm == null ? "null" : "ok=" + rm.ok);
 
@@ -1143,6 +1144,7 @@ long long add64(long long a, long long b) { return a + b; }
 long long big64() { return 9007199254740993LL; }
 unsigned long long mix64(const char* s, unsigned long long seed) { unsigned long long h = seed; for (int i = 0; s[i]; i++) h = h * 1099511628211ULL + (unsigned char)s[i]; return h; }
 long long plain(long long a) { return a; }
+int smallw(int v) { return v + 1; }
 long long withd(long long a, int b = 7) { return a + b; }
 long long wlen(const std::string& s, long long k) { return (long long)s.size() + k; }
 long long ovl(long long a, int b) { return a + b; }
@@ -1159,6 +1161,13 @@ long long ovl(int a, long long b) { return a * 1000 + b; }
     var h2 = wideStr(wm.callWide("mix64", [s2], [], ["x"]));
     ok("a wide seed keeps its low bits", h1 != h2, h1 + " vs " + h2);
     eq("the numeric path is unchanged", Std.string(wm.callAuto("plain", [7])), "7");
+    eq("a non wide result converts", wideStr(wm.callWide("smallw", [], [41])), "0:42");
+    JitHost.lastError = "";
+    eq("an unknown name returns zero", wideStr(wm.callWide("nosuch", [])), "0:0");
+    ok("an unknown name is reported", JitHost.lastError.indexOf("no function of that name") >= 0, JitHost.lastError);
+    JitHost.lastError = "";
+    eq("an unreadable signature returns zero", wideStr(wm.callWideSig("add64", "lbroke", [])), "0:0");
+    ok("an unreadable signature is reported", JitHost.lastError.indexOf("cannot be read") >= 0, JitHost.lastError);
     eq("a default fills a wide call", wideStr(wm.callWide("withd", [haxe.Int64.ofInt(5)])), "0:12");
     eq("a struct argument gets a wide entry", wideStr(wm.callWide("wlen", [haxe.Int64.ofInt(10)], [], ["abcd"])), "0:14");
     JitHost.lastError = "";
