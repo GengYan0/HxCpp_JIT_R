@@ -59,8 +59,7 @@ class JitImage {
 
   public function summary():String {
     if (!ok) return "image " + path + " FAILED: " + error;
-    var hi = JitNative.hiOf64(JitNative.toFloat(base)) & 0xFFFFF;
-    var addr = StringTools.hex(hi, 0) + StringTools.hex(JitNative.loOf64(JitNative.toFloat(base)), 8);
+    var addr = JitLoader.hex64(JitNative.toFloat(base));
     return 'image $path base=0x$addr image=${sizeOfImage}B sections=${sections.length} exports=${Lambda.count(exports)} imports=${imports.length} reloc=$relocCount rebased=$rebased manual=$manual';
   }
 }
@@ -101,6 +100,11 @@ class JitLoader {
 
   static inline function u32(v:Int):Float {
     return v >= 0 ? v * 1.0 : v + 4294967296.0;
+  }
+
+  public static function hex64(v:Float):String {
+    if (v == 0.0) return "0";
+    return StringTools.hex(JitNative.hiOf64(v) & 0xFFFFF, 0) + StringTools.hex(JitNative.loOf64(v), 8);
   }
 
   static function readStr(base:cpp.SizeT, rva:Int, max:Int = 512, limit:Int = 0):String {
@@ -239,7 +243,7 @@ class JitLoader {
       return img;
     }
     img.base = base;
-    if (verbose) Sys.println("[load] alloc base=0x" + StringTools.hex(Std.int(JitNative.toFloat(base)), 0) + " want=0x" + StringTools.hex(Std.int(img.imageBase), 0) + " size=" + img.sizeOfImage);
+    if (verbose) Sys.println("[load] alloc base=0x" + hex64(JitNative.toFloat(base)) + " want=0x" + hex64(img.imageBase) + " size=" + img.sizeOfImage);
     var delta = JitNative.toFloat(base) - img.imageBase;
     img.rebased = delta != 0;
 

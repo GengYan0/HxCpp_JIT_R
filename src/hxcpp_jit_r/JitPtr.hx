@@ -82,8 +82,7 @@ class JitPtr {
   }
 
   public function toString():String {
-    var hi = JitNative.hiOf64(address) & 0xFFFFF;
-    return "JitPtr(0x" + StringTools.hex(hi, 5) + StringTools.hex(JitNative.loOf64(address), 8) + ")";
+    return "JitPtr(0x" + JitLoader.hex64(address) + ")";
   }
 
   public static function of(v:Float):JitPtr {
