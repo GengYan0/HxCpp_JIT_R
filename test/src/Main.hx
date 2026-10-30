@@ -279,6 +279,8 @@ unsigned int twiceU(unsigned int v) { return v * 2u; }
     var fp = am.ptr("half");
     ok("fn ptr not null", !fp.isNull(), fp.toString());
     ok("ptr format", StringTools.startsWith(fp.toString(), "JitPtr(0x"));
+    var keepb = haxe.io.Bytes.alloc(8);
+    ok("an offset keeps the copy alive", new JitPtr(1024.0, keepb).offset(8).keep == keepb, "");
     ok("null ptr", new hxcpp_jit_r.JitPtr(0).isNull());
 
     head("overload");
@@ -797,6 +799,8 @@ double ax = 3; double ay = 4;
     eq("expr scales", Std.string(ex.expr("(ax + ay) * 2")), "14");
     eq("expr sqrt", Std.string(ex.expr("sqrt(ax*ax + ay*ay)")), "5");
     eq("expr compare", Std.string(ex.expr("ax < ay")), "1");
+    var short1 = ex.expr("min(1)");
+    ok("a short call is not an exception", short1 != short1, "" + short1);
     eq("expr ternary", Std.string(ex.expr("ax > ay ? 10 : 20")), "20");
     eq("expr functions", Std.string(ex.expr("max(ax, ay) + min(ax, ay)")), "7");
     eq("expr clamp", Std.string(ex.expr("clamp(9, 0, 5)")), "5");

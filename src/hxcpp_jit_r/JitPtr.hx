@@ -14,7 +14,7 @@ class JitPtr {
   }
 
   public function offset(delta:Float):JitPtr {
-    return new JitPtr(address + delta);
+    return new JitPtr(address + delta, keep);
   }
 
   public function valid():Bool {
@@ -82,7 +82,8 @@ class JitPtr {
   }
 
   public function toString():String {
-    return "JitPtr(0x" + StringTools.hex(Std.int(address), 12) + ")";
+    var hi = JitNative.hiOf64(address) & 0xFFFFF;
+    return "JitPtr(0x" + StringTools.hex(hi, 5) + StringTools.hex(JitNative.loOf64(address), 8) + ")";
   }
 
   public static function of(v:Float):JitPtr {
