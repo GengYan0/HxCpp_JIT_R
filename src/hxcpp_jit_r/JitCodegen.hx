@@ -72,8 +72,7 @@ class JitCodegen {
 
     if (extra != null) {
       for (s in extra) {
-        if (sigs.exists(s) || s.indexOf("(") < 0) continue;
-        if (StringTools.startsWith(s, "S(")) continue;
+        if (sigs.exists(s) || !extraSigOk(s)) continue;
         sigs.set(s, true);
         used = true;
         if (s.indexOf("S") >= 0) needString = true;
@@ -184,6 +183,24 @@ class JitCodegen {
     if (!used) return "";
     var head = needString ? "\n#include <string>\n" : "\n";
     return head + b.toString();
+  }
+
+  public static function extraSigOk(s:String):Bool {
+    var p = s.indexOf("(");
+    if (p <= 0 || s.charAt(s.length - 1) != ")") return false;
+    if (s.indexOf(")") != s.length - 1) return false;
+    var ret = s.substr(0, p);
+    if (ret.length != 1 || "dfbchiulpsSv".indexOf(ret) < 0) return false;
+    if (ret == "S" || ret == "v" && false) return false;
+    var args = s.substr(p + 1, s.length - p - 2);
+    if (args.length > 6) return false;
+    var strs = 0;
+    for (i in 0...args.length) {
+      var c = args.charAt(i);
+      if ("dfbchiulpsS".indexOf(c) < 0) return false;
+      if (c == "s" || c == "S") strs++;
+    }
+    return strs <= 4;
   }
 
   public static function leafList(stMap:Map<String, JitStructInfo>, sname:String, prefix:String = "", depth:Int = 0):Array<JitLeaf> {

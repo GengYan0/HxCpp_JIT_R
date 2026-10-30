@@ -321,6 +321,10 @@ class JitScan {
       if (sp < 0) continue;
       var ret = StringTools.trim(before.substr(0, sp));
       var name = StringTools.trim(before.substr(sp + 1));
+      while (StringTools.startsWith(name, "*")) {
+        ret += "*";
+        name = StringTools.trim(name.substr(1));
+      }
       if (!isIdent(name)) continue;
       if (kw.indexOf(name) >= 0) continue;
       if (name.indexOf("::") >= 0) continue;
@@ -394,62 +398,99 @@ class JitScan {
       for (seg in s.substr(0, semi).split(";")) {
         var decl = StringTools.trim(seg);
         if (decl == "") continue;
-        var eq = decl.indexOf("=");
-        if (eq >= 0) decl = StringTools.trim(decl.substr(0, eq));
-        if (decl.indexOf("{") >= 0 || decl.indexOf("}") >= 0) continue;
         var isConst = decl.indexOf("const") >= 0;
         var isStatic = decl.indexOf("static") >= 0 || decl.indexOf("extern") >= 0;
-        decl = trimQualifiers(decl);
-        var sp = lastSpace(decl);
+        var parts = splitTop(decl, 44);
+        var head = trimQualifiers(cutInit(parts[0]));
+        if (head.indexOf("{") >= 0 || head.indexOf("}") >= 0) continue;
+        var sp = lastSpace(head);
         if (sp < 0) continue;
-        var type = StringTools.trim(decl.substr(0, sp));
-        var name = StringTools.trim(decl.substr(sp + 1));
-        var kind = "num";
-        var elem = "";
-        var size = 0;
-        var structName = "";
-        var lb = name.indexOf("[");
-        if (lb > 0) {
-          var rb = name.indexOf("]", lb);
-          if (rb < 0) continue;
-          var sz = Std.parseInt(StringTools.trim(name.substring(lb + 1, rb)));
-          name = StringTools.trim(name.substr(0, lb));
-          if (!isIdent(name)) continue;
-          if (sz == null || sz <= 0) continue;
-          var c = code(type);
-          if (c == "?") {
-            var st = sts.get(StringTools.trim(type));
-            if (st == null) continue;
-            kind = "structarray";
-            structName = st.name;
-            size = sz;
-          } else {
-            if (c == "v" || c == "?" || c == "S" || c == "R" || c == "W") continue;
-            kind = "array";
-            elem = c;
-            size = sz;
-          }
-        } else {
-          if (!isIdent(name)) continue;
-          if (isNumeric(type, nums)) {
-            kind = "num";
-          } else if (isPointerType(type)) {
-            kind = "ptr";
-          } else if (code(type) == "S") {
-            kind = "sstr";
-          } else {
-            var st = sts.get(StringTools.trim(type));
-            if (st == null) continue;
-            kind = "struct";
-            structName = st.name;
-          }
+        var type = StringTools.trim(head.substr(0, sp));
+        var names:Array<String> = [StringTools.trim(head.substr(sp + 1))];
+        for (k in 1...parts.length) {
+          var q = StringTools.trim(cutInit(parts[k]));
+          if (q != "") names.push(q);
         }
-        if (seen.exists(name)) continue;
-        seen.set(name, true);
-        out.push({name: name, type: type, isConst: isConst, isStatic: isStatic, kind: kind, elem: elem, size: size, structName: structName});
+        for (nm in names) addVar(out, seen, type, nm, isConst, isStatic, nums, sts);
       }
     }
     return out;
+  }
+
+  static function cutInit(d:String):String {
+    var t = StringTools.trim(d);
+    var q = 0;
+    for (i in 0...t.length) {
+      var c = t.charCodeAt(i);
+      if (c == 40 || c == 60 || c == 91) q++;
+      else if (c == 41 || c == 62 || c == 93) q--;
+      else if (c == 61 && q == 0) return StringTools.trim(t.substr(0, i));
+    }
+    return t;
+  }
+
+  static function splitTop(s:String, sep:Int):Array<String> {
+    var out:Array<String> = [];
+    var depth = 0;
+    var start = 0;
+    for (i in 0...s.length) {
+      var c = s.charCodeAt(i);
+      if (c == 40 || c == 60 || c == 91) depth++;
+      else if (c == 41 || c == 62 || c == 93) depth--;
+      else if (c == sep && depth == 0) {
+        out.push(StringTools.trim(s.substring(start, i)));
+        start = i + 1;
+      }
+    }
+    out.push(StringTools.trim(s.substr(start)));
+    return out;
+  }
+
+  static function addVar(out:Array<JitVarInfo>, seen:Map<String, Bool>, type:String, name0:String, isConst:Bool, isStatic:Bool, nums:Array<String>, sts:Map<String, JitStructInfo>):Void {
+    var name = StringTools.trim(name0);
+    var kind = "num";
+    var elem = "";
+    var size = 0;
+    var structName = "";
+    var lb = name.indexOf("[");
+    if (lb > 0) {
+      var rb = name.indexOf("]", lb);
+      if (rb < 0) return;
+      var sz = Std.parseInt(StringTools.trim(name.substring(lb + 1, rb)));
+      name = StringTools.trim(name.substr(0, lb));
+      if (!isIdent(name)) return;
+      if (sz == null || sz <= 0) return;
+      var c = code(type);
+      if (c == "?") {
+        var st = sts.get(StringTools.trim(type));
+        if (st == null) return;
+        kind = "structarray";
+        structName = st.name;
+        size = sz;
+      } else {
+        if (c == "v" || c == "S" || c == "R" || c == "W") return;
+        kind = "array";
+        elem = c;
+        size = sz;
+      }
+    } else {
+      if (!isIdent(name)) return;
+      if (isNumeric(type, nums)) {
+        kind = "num";
+      } else if (isPointerType(type)) {
+        kind = "ptr";
+      } else if (code(type) == "S") {
+        kind = "sstr";
+      } else {
+        var st = sts.get(StringTools.trim(type));
+        if (st == null) return;
+        kind = "struct";
+        structName = st.name;
+      }
+    }
+    if (seen.exists(name)) return;
+    seen.set(name, true);
+    out.push({name: name, type: type, isConst: isConst, isStatic: isStatic, kind: kind, elem: elem, size: size, structName: structName});
   }
 
   static function maskStructs(clean:String):String {
@@ -666,7 +707,13 @@ class JitScan {
         continue;
       }
       var sp = lastSpace(x);
-      res.push({type: sp < 0 ? x : StringTools.trim(x.substr(0, sp)), def: def});
+      var ty = sp < 0 ? x : StringTools.trim(x.substr(0, sp));
+      var tn = sp < 0 ? "" : StringTools.trim(x.substr(sp + 1));
+      while (StringTools.startsWith(tn, "*")) {
+        ty += "*";
+        tn = StringTools.trim(tn.substr(1));
+      }
+      res.push({type: ty, def: def});
     }
     return res;
   }

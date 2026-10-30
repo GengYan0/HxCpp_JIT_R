@@ -20,6 +20,12 @@ typedef JitResult = {
   var ms:Float;
 }
 
+typedef JitFlags = {
+  var opt:String;
+  var std:String;
+  var extra:Array<String>;
+}
+
 typedef JitMulti = {
   var files:Array<String>;
   var texts:Array<String>;
@@ -58,9 +64,8 @@ class JitCompiler {
   #if target.threaded
   static var pchLock = new sys.thread.Mutex();
   #end
-  var pchState:Int = 0;
-  var pchFile:String = "";
-  var pchObj:String = "";
+  var pchOk:Map<String, {file:String, obj:String}> = new Map();
+  var pchBad:Map<String, Bool> = new Map();
 
   public function new(tool:JitToolchain, cache:JitCache) {
     this.tool = tool;
@@ -71,51 +76,59 @@ class JitCompiler {
     return tool.backend == "msvc" || tool.backend == "clangcl";
   }
 
+  public function flags():JitFlags {
+    return {opt: opt, std: std, extra: extra == null ? [] : extra.copy()};
+  }
+
+  public function flagKeyFor(f:JitFlags):String {
+    return JitCache.key(JitAbi.HEADER, tool.backend + "|" + f.std + "|" + f.opt + "|" + f.extra.join(" ") + "|" + JitAbi.VERSION);
+  }
+
   public function flagKey():String {
-    return JitCache.key(JitAbi.HEADER, tool.backend + "|" + std + "|" + opt + "|" + extra.join(" ") + "|" + JitAbi.VERSION);
+    return flagKeyFor(flags());
   }
 
   public function prepare():Bool {
-    if (!usePch || tool.backend != "msvc") return false;
-    if (pchState == 1) return true;
+    return pch(flags()) != null;
+  }
+
+  function pch(f:JitFlags):Null<{file:String, obj:String}> {
+    if (!usePch || tool.backend != "msvc") return null;
+    var k = flagKeyFor(f);
+    var hit = pchOk.get(k);
+    if (hit != null) return hit;
+    if (pchBad.exists(k)) return null;
     #if target.threaded
     pchLock.acquire();
     #end
-    var r = false;
+    var r:Null<{file:String, obj:String}> = null;
     try {
-      r = prepareLocked();
+      r = pchLocked(f, k);
     } catch (e:Dynamic) {
       if (Jit.debug) Jit.log("[jit] pch prepare failed: " + Std.string(e));
-      r = false;
+      r = null;
     }
     #if target.threaded
     pchLock.release();
     #end
+    if (r == null) pchBad.set(k, true) else pchOk.set(k, r);
     return r;
   }
 
-  function prepareLocked():Bool {
-    if (pchState != 0) return pchState == 1;
-    pchState = -1;
-    if (!tool.ready) return false;
+  function pchLocked(f:JitFlags, k:String):Null<{file:String, obj:String}> {
+    if (!tool.ready) return null;
     var base = cache.root + "/pch";
     mkdirs(base);
-    var k = flagKey();
     var file = base + "/rjit_" + k + ".pch";
     var obj = base + "/pch_" + k + ".obj";
-    if (FileSystem.exists(file) && FileSystem.exists(obj)) {
-      pchFile = file;
-      pchObj = obj;
-      pchState = 1;
-      return true;
-    }
+    if (FileSystem.exists(file) && FileSystem.exists(obj)) return {file: file, obj: obj};
     var tag = Std.random(1000000);
     var src = base + "/pch_" + k + "_" + tag + ".cpp";
     var tmpPch = file + "." + tag + ".tmp";
     var tmpObj = base + "/pch_" + k + "_" + tag + ".obj";
     File.saveContent(src, "int rjit_pch_anchor = 0;\n");
     var args = [
-      "/nologo", "/c", "/utf-8", "/std:" + std, "/" + opt, "/EHsc", "/MT",
+      "/nologo", "/c", "/utf-8", "/std:" + f.std, "/" + f.opt, "/EHsc", "/MT",
       "/DNDEBUG", "/DRJIT_DEFINE_ABI_EXPORT", "/D_CRT_SECURE_NO_WARNINGS",
       "/Ycrjit_abi.h", "/Fp" + tmpPch, "/Fo:" + base + "/",
       "/FIrjit_abi.h", "/I" + cache.root, src
@@ -129,12 +142,9 @@ class JitCompiler {
     for (q in [src, tmpPch, tmpObj]) if (FileSystem.exists(q)) try FileSystem.deleteFile(q) catch (e:Dynamic) {}
     if (!FileSystem.exists(file) || !FileSystem.exists(obj)) {
       if (Jit.debug) Jit.log("[jit] pch unavailable: " + r.err);
-      return false;
+      return null;
     }
-    pchFile = file;
-    pchObj = obj;
-    pchState = 1;
-    return true;
+    return {file: file, obj: obj};
   }
 
   static function mkdirs(p:String):Void {
@@ -145,7 +155,8 @@ class JitCompiler {
     try FileSystem.createDirectory(p) catch (e:Dynamic) {}
   }
 
-  public function build(key:String, src:String, lineShift:Int = 0, sigs:Array<String> = null, multi:JitMulti = null):JitResult {
+  public function build(key:String, src:String, lineShift:Int = 0, sigs:Array<String> = null, multi:JitMulti = null, flags:JitFlags = null):JitResult {
+    var f = flags == null ? this.flags() : flags;
     var mu = keyLock(key);
     mu.acquire();
     var lockPath = cache.root + "/locks/" + key + ".lock";
@@ -154,7 +165,7 @@ class JitCompiler {
     var r:JitResult = null;
     var err:Dynamic = null;
     try {
-      r = buildLocked(key, src, lineShift, sigs, multi);
+      r = buildLocked(key, src, lineShift, sigs, multi, f);
     } catch (e:Dynamic) {
       err = e;
     }
@@ -185,9 +196,9 @@ class JitCompiler {
     return 0;
   }
 
-  function buildLocked(key:String, src:String, lineShift:Int, sigs:Array<String>, multi:JitMulti):JitResult {
+  function buildLocked(key:String, src:String, lineShift:Int, sigs:Array<String>, multi:JitMulti, f:JitFlags):JitResult {
     var t0 = Sys.time();
-    if (pchState != 1 && isMsvcLike()) prepare();
+    var pc = isMsvcLike() ? pch(f) : null;
     var dir = cache.dirFor(key);
     var cpp = dir + "/mod" + (isMsvcLike() ? ".cpp" : ".cc");
     var texts = [src];
@@ -232,7 +243,7 @@ class JitCompiler {
     if (!FileSystem.exists(cpp) || File.getContent(cpp) != body) JitCache.writeAtomic(cpp, body);
     var more = multi == null ? null : multi.files;
     var incs = multi == null ? null : multi.includes;
-    var args = isMsvcLike() ? msvcArgs(cpp, tmpOut, dir, more, incs) : gccArgs(cpp, tmpOut, dir, more, incs);
+    var args = isMsvcLike() ? msvcArgs(cpp, tmpOut, dir, more, incs, f, pc) : gccArgs(cpp, tmpOut, dir, more, incs, f);
     lastCommand = tool.exe + " " + args.join(" ");
     if (Jit.debug) Jit.log("[jit] exec " + lastCommand);
     var r = run(args);
@@ -271,22 +282,23 @@ class JitCompiler {
     return ret + " " + f.name + "(" + (args.length == 0 ? "" : args.join(", ")) + ")";
   }
 
-  function msvcArgs(cpp:String, out:String, dir:String, more:Array<String> = null, incs:Array<String> = null):Array<String> {
-    var a = extra.copy();
+  function msvcArgs(cpp:String, out:String, dir:String, more:Array<String> = null, incs:Array<String> = null, f:JitFlags = null, pc:{file:String, obj:String} = null):Array<String> {
+    if (f == null) f = flags();
+    var a = f.extra.copy();
     a.push("/nologo");
     a.push("/LD");
     a.push("/utf-8");
-    a.push("/std:" + std);
-    a.push("/" + opt);
+    a.push("/std:" + f.std);
+    a.push("/" + f.opt);
     a.push("/EHsc");
     a.push("/MT");
     a.push("/DNDEBUG");
     a.push("/DRJIT_DEFINE_ABI_EXPORT");
     a.push("/D_CRT_SECURE_NO_WARNINGS");
     if (tool.backend == "clangcl") a.push("/Wno-unused-command-line-argument");
-    if (pchState == 1) {
+    if (pc != null) {
       a.push("/Yurjit_abi.h");
-      a.push("/Fp" + pchFile);
+      a.push("/Fp" + pc.file);
     }
     a.push("/FIrjit_abi.h");
     a.push("/I" + cache.root);
@@ -294,7 +306,7 @@ class JitCompiler {
     if (incs != null) for (p in incs) if (p != null && p != "") a.push("/I" + p);
     a.push(cpp);
     if (more != null) for (p in more) if (p != null && p != "") a.push(p);
-    if (pchState == 1 && pchObj != "") a.push(pchObj);
+    if (pc != null && pc.obj != "") a.push(pc.obj);
     a.push("/Fe:" + out);
     a.push("/Fo:" + dir + "/");
     a.push("/link");
@@ -303,8 +315,9 @@ class JitCompiler {
     return a;
   }
 
-  function gccArgs(cpp:String, out:String, dir:String, more:Array<String> = null, incs:Array<String> = null):Array<String> {
-    return posixArgs(cpp, out, dir, cache.headerFile(), cache.root, std, opt, extra, tool.backend, more, incs);
+  function gccArgs(cpp:String, out:String, dir:String, more:Array<String> = null, incs:Array<String> = null, f:JitFlags = null):Array<String> {
+    if (f == null) f = flags();
+    return posixArgs(cpp, out, dir, cache.headerFile(), cache.root, f.std, f.opt, f.extra, tool.backend, more, incs);
   }
 
   public static function needsStringHeader(src:String):Bool {

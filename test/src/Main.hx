@@ -8,6 +8,7 @@ import hxcpp_jit_r.JitPtr;
 import hxcpp_jit_r.JitLoader;
 import hxcpp_jit_r.JitPlatform;
 import hxcpp_jit_r.JitScan;
+import hxcpp_jit_r.JitCodegen;
 import sys.FileSystem;
 #if cpp
 import sys.thread.Thread;
@@ -124,6 +125,40 @@ RJIT(d) { return 4; }
     var eb = Jit.compile("evalbad", "RJIT(__e) {\nreturn 1;\nreturn zzz;\n}\n", {lineShift: 1});
     var ue = eb.diag.filter(function(d) return d.file == "user");
     if (ue.length > 0) eq("eval diag line == 2", Std.string(ue[0].line), "2") else ok("eval diag present", false);
+
+    head("call routing");
+    var rm = Jit.compile("routing", '
+double halfc(double x) { return x / 2; }
+int mixd(const char* s, int b = 5) { return (int)strlen(s) + b; }
+std::string mkstr(int n) { return std::string((size_t)n, 120); }
+double dflt(double a, double b = 4) { return a + b; }
+int two(int a, int b, int c = 9) { return a + b + c; }
+double e = 5;
+RJIT(macroonly) { return 7; }
+');
+    ok("routing module compiles", rm.ok, rm.diag.length > 0 ? JitCompiler.describe(rm.diag[0]) : "");
+    eq("call reaches a scanned function", Std.string(rm.call("halfc", 10)), "5");
+    eq("callA reaches a scanned function", Std.string(rm.callA("halfc", [9])), "4.5");
+    eq("a string argument still lands in order", Std.string(rm.callAuto("mixd", [], ["ab"])), "7");
+    eq("a numeric default fills the rest", Std.string(rm.callAuto("dflt", [1])), "5");
+    JitHost.lastError = "";
+    eq("too few arguments is refused", Std.string(rm.callAuto("two", [1])), "0");
+    ok("too few arguments is reported", JitHost.lastError.indexOf("do not fit") >= 0, JitHost.lastError);
+    JitHost.lastError = "";
+    eq("callAuto on a string result is refused", Std.string(rm.callAuto("mkstr", [3])), "0");
+    ok("a string result points at callStr", JitHost.lastError.indexOf("callStr") >= 0, JitHost.lastError);
+    eq("callStr reads the string", rm.callStr("mkstr", [3]), "xxx");
+    eq("a variable named e wins over the constant", Std.string(rm.get("e * 2")), "10");
+    eq("pi is still a constant", Std.string(rm.expr("pi")), Std.string(Math.PI));
+    ok("bind on a plain function works", rm.bind("halfc").valid(), "");
+    ok("bind on a macro export is refused", !rm.bind("macroonly").valid(), "");
+
+    head("pch per flag set");
+    var p17 = Jit.compile("pch17", 'int p17() { return 1; }');
+    var p14 = Jit.compile("pch14", 'int p14() { return 2; }', {std: "c++14"});
+    ok("a second standard builds too", p17.ok && p14.ok, (p17.diag.length > 0 ? JitCompiler.describe(p17.diag[0]) : "") + (p14.diag.length > 0 ? JitCompiler.describe(p14.diag[0]) : ""));
+    eq("the default module still calls", Std.string(p17.callAuto("p17", [])), "1");
+    eq("the c++14 module calls", Std.string(p14.callAuto("p14", [])), "2");
 
     head("session");
     var s = new JitSession("sess");
@@ -1004,6 +1039,15 @@ double alive() { return counter + hits[1]; }
     var baddef = JitScan.functions("double tw(double a = M_PI) { return a * 2; }\ndouble okdef(double a = 1.5) { return a; }\n");
     eq("a header constant default is refused", [for (f in baddef) if (f.name == "tw") Std.string(f.callable)].join(""), "false");
     eq("a numeric default is kept", [for (f in baddef) if (f.name == "okdef") Std.string(f.callable)].join(""), "true");
+    var multi = JitScan.globals("double gx, gy;\nint a2[3], b2;\n");
+    eq("several declarators on one line", [for (v in multi) v.name].join(","), "gx,gy,a2,b2");
+    eq("the second declarator keeps its size", Std.string([for (v in multi) if (v.name == "a2") v.size].join("")), "3");
+    var spaced = JitScan.functions("int fsp(char *s) { return 0; }\nchar* csp(int v) { return 0; }\n");
+    eq("a star before the name still reads as a pointer", [for (f in spaced) if (f.name == "fsp") f.sig].join(""), "i(s)");
+    eq("a star after the return type", [for (f in spaced) if (f.name == "csp") f.sig].join(""), "s(i)");
+    eq("a plain signature is accepted", Std.string(JitCodegen.extraSigOk("d(dd)")), "true");
+    eq("a reference signature is refused", Std.string(JitCodegen.extraSigOk("i(R)")), "false");
+    eq("an overflowed signature is refused", Std.string(JitCodegen.extraSigOk("d(dddddddd)")), "false");
 
     head("thread local blocks");
     var seed = haxe.io.Bytes.alloc(8);

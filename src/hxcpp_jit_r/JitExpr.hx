@@ -321,14 +321,14 @@ class JitExprParser {
       }
       return callFn(name, args);
     }
-    if (name == "pi") return JNum(Math.PI);
-    if (name == "e") return JNum(2.718281828459045);
     if (resStr != null) {
       var t = resStr(name);
       if (t != null) return JStr(t);
     }
     var v = res(name);
     if (v == v) return JNum(v);
+    if (name == "pi") return JNum(Math.PI);
+    if (name == "e") return JNum(2.718281828459045);
     return JNum(Math.NaN);
   }
 

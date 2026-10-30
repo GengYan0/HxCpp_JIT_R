@@ -176,14 +176,17 @@ class JitModule {
     return new JitPtr(address(n));
   }
 
-  inline function guard(r:Float, method:String, n:String):Float {
-    if (poisoned) {
-      if (!poisonReported) {
-        poisonReported = true;
-        JitHost.error(method, n, "the module faulted earlier and was not repaired, reload it");
-      }
-      return 0.0;
+  inline function blocked(method:String, n:String):Bool {
+    if (!poisoned) return false;
+    if (!poisonReported) {
+      poisonReported = true;
+      JitHost.error(method, n, "the module faulted earlier and was not repaired, reload it");
     }
+    return true;
+  }
+
+  inline function guard(r:Float, method:String, n:String):Float {
+    if (blocked(method, n)) return 0.0;
     if (r != r) {
       if (JitNative.isFault(r) != 0 && Jit.poisonOnFault) {
         poisoned = true;
@@ -744,15 +747,29 @@ class JitModule {
   }
 
   function callPicked(f:JitFnInfo, n:String, args:Array<Float>, strs:Array<String>):Float {
-    if (f == null || !f.callable || handle == 0) return callA(n, args);
+    if (f == null || !f.callable || handle == 0) return rawCall(n, args);
     if (f.ret == "t") return callStruct(n, args, strs).address;
+    if (f.ret == "S") {
+      JitHost.error("callAuto", n, "a std::string result is read with callStr");
+      return 0.0;
+    }
     var fp = ptrOf(n, f.sig);
     if (fp == 0) fp = resolve("rjit_ptr_" + n);
-    if (fp == 0) return callA(n, args);
+    if (fp == 0) {
+      JitHost.error("callAuto", n, "no entry point was emitted for " + f.sig);
+      return 0.0;
+    }
     var ar = f.args.length;
-    if (JitCodegen.defFrom(f) >= 0 && (strs == null || strs.length == 0)) ar = args.length;
+    var given = ar;
+    if (JitCodegen.defFrom(f) >= 0) {
+      given = args.length + (strs == null ? 0 : strs.length);
+      if (given < ar) ar = given;
+    }
     var d = dispFor(f, ar);
-    if (d == 0) return callA(n, args);
+    if (d == 0) {
+      JitHost.error("callAuto", n, given + " argument(s) do not fit " + f.sig);
+      return 0.0;
+    }
     calls++;
     var r = usesStr(f.sig)
       ? JitNative.callViaB(d, fp, ctx, args.length, a(args, 0), a(args, 1), a(args, 2), a(args, 3), a(args, 4), a(args, 5),
@@ -774,13 +791,7 @@ class JitModule {
   }
 
   public function callWideSig(n:String, sig:String, wide:Array<haxe.Int64>, ?nums:Array<Float>, ?strs:Array<String>):haxe.Int64 {
-    if (poisoned) {
-      if (!poisonReported) {
-        poisonReported = true;
-        JitHost.error("callWide", n, "the module faulted earlier and was not repaired, reload it");
-      }
-      return haxe.Int64.ofInt(0);
-    }
+    if (blocked("callWide", n)) return haxe.Int64.ofInt(0);
     var f = bySig.get(n + "|" + sig);
     if (f == null) return wideFail(n, "the module has no function " + n + " with signature " + sig);
     if (!f.callable) return wideFail(n, "signature " + sig + " is not callable");
@@ -944,6 +955,8 @@ class JitModule {
     if (s == "") return null;
     if (s == "true") return haxe.Int64.ofInt(1);
     if (s == "false") return haxe.Int64.ofInt(0);
+    if (s == "nullptr" || s == "NULL") return haxe.Int64.ofInt(0);
+    if (s.length == 3 && s.charAt(0) == "'" && s.charAt(2) == "'") return haxe.Int64.ofInt(s.charCodeAt(1));
     var neg = false;
     if (s.charAt(0) == "-") {
       neg = true;
@@ -1006,13 +1019,18 @@ class JitModule {
   }
 
   public function call(n:String, a0:Float = 0.0, a1:Float = 0.0, a2:Float = 0.0, a3:Float = 0.0, a4:Float = 0.0, a5:Float = 0.0):Float {
-    var f = fn(n);
-    if (f == 0) return 0.0;
-    calls++;
-    return guard(JitNative.invoke(f, ctx, 6, a0, a1, a2, a3, a4, a5), "call", n);
+    var info = fns.get(n);
+    if (info != null && info.callable) return callAuto(n, [a0, a1, a2, a3, a4, a5]);
+    return rawCall(n, [a0, a1, a2, a3, a4, a5]);
   }
 
   public function callA(n:String, args:Array<Float>):Float {
+    var info = fns.get(n);
+    if (info != null && info.callable) return callAuto(n, args == null ? [] : args);
+    return rawCall(n, args == null ? [] : args);
+  }
+
+  function rawCall(n:String, args:Array<Float>):Float {
     var f = fn(n);
     if (f == 0) return 0.0;
     var a0 = args.length > 0 ? args[0] : 0.0;
@@ -1022,7 +1040,7 @@ class JitModule {
     var a4 = args.length > 4 ? args[4] : 0.0;
     var a5 = args.length > 5 ? args[5] : 0.0;
     calls++;
-    return guard(JitNative.invoke(f, ctx, args.length, a0, a1, a2, a3, a4, a5), "callA", n);
+    return guard(JitNative.invoke(f, ctx, args.length, a0, a1, a2, a3, a4, a5), "call", n);
   }
 
   public function address(n:String):Float {
@@ -1055,6 +1073,7 @@ class JitModule {
   }
 
   public function callStr(n:String, args:Array<Float> = null, ?strs:Array<String>):String {
+    if (blocked("callStr", n)) return "";
     JitHost.clearRet(id);
     var f = fns.get(n);
     if (f != null && f.ret == "S" && handle != 0) {
@@ -1082,6 +1101,7 @@ class JitModule {
   var structSlot:Int = 0;
 
   public function callStruct(n:String, args:Array<Float> = null, ?strs:Array<String>):JitPtr {
+    if (blocked("callStruct", n)) return new JitPtr(0);
     var f = fns.get(n);
     if (f == null || f.ret != "t" || handle == 0) return new JitPtr(0);
     var ar = args == null ? [] : args;
@@ -1212,6 +1232,7 @@ class JitModule {
 
   public function bind(n:String, ?sig:String):JitFn {
     var f = fns.get(n);
+    if (sig == null && f != null && !f.callable) return new JitFn(this, n, "", 0, 0, 0, false, false);
     var s = sig != null ? sig : (f == null ? null : f.sig);
     if (s == null || handle == 0) return new JitFn(this, n, "", 0, 0, 0, false, false);
     var fp = ptrOf(n, s);

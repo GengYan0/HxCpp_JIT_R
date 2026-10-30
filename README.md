@@ -155,7 +155,7 @@ m.callAuto("bump", []);
 m.getVar("counter");        // 1
 ```
 
-Scanning is line based: an export or a global keeps its whole signature, the default arguments and the opening brace on one line, and the opening brace may also sit on the next line. Functions and globals inside a namespace are found at any indentation; anything inside a class, struct or function body is left alone. A signature the type system cannot express through numbers and strings, such as a template or an `auto` return, is listed in `module.skipped`.
+Scanning is line based: an export or a global keeps its whole signature, the default arguments and the opening brace on one line, and the opening brace may also sit on the next line. Several globals on one line (`double x, y;`) each get their own entry, and `char *s` reads the same as `char* s`. Functions and globals inside a namespace are found at any indentation; anything inside a class, struct or function body is left alone. A signature the type system cannot express through numbers and strings, such as a template or an `auto` return, is listed in `module.skipped`.
 
 The standard library, inline assembly, SIMD intrinsics and templates all work. The default is `/MT`, so the library carries its own C runtime.
 
@@ -192,7 +192,7 @@ The standard library, inline assembly, SIMD intrinsics and templates all work. T
 | Member | Meaning |
 |---|---|
 | `ok` / `dll` / `image` / `symbols` / `ms` / `cached` / `diag` / `log` | State |
-| `call(name, a0..a5):Float` | Six `double` arguments, guarded |
+| `call(name, a0..a5):Float` | Six `double` arguments; for a scanned function they are its arguments, for a compiled `RJIT(...)` export they are `RJIT_A0`..`RJIT_A5` |
 | `callFast(name, a0..a5):Float` | Same, without the fault guard |
 | `callA(name, args)` | Variable argument count |
 | `callAuto(name, args, ?strs)` | Convert by scanned signature, picking the overload by argument count |
@@ -864,6 +864,8 @@ Time goes into compiler process startup and linking, not into the amount of code
 - `callWide` is meant for a function that returns one of the 64 bit types; any other numeric return is converted to `Int64`, and a string, struct or `void` return is refused with a message
 - A name the module does not carry returns zero from `callAuto`, `call` and `callWide`; `has(name)` and `fnNames()` tell whether it exists
 - A default argument must be a literal, such as a number, a quoted string, `true`, `false` or `nullptr`; a name from a header puts the function in `module.skipped`
+- The precompiled header is kept per flag set, so a module built with another `std` or `opt` builds its own instead of reusing one that does not match
+- A signature handed to `Jit.compile(..., {sigs: [...]})` is used only when it reads as one letter of return and up to six argument letters; anything else is ignored
 - An enum type is read as an `int`, for arguments and returns
 - `JitNative.peek` and `JitNative.poke` take any address and no check stands between them and the process 
 - A guard that fires abandons the faulting frame without unwinding it, so the module is marked `poisoned`, every later call through `call`, `callAuto`, `callSig`, `callWide` or a bound handle returns zero and the first one reports it; reads and writes of globals still work, for inspection. Reload the module to use it again (`Jit.poisonOnFault = false` keeps the old behaviour)
@@ -894,7 +896,7 @@ Time goes into compiler process startup and linking, not into the amount of code
 
 ## Testing
 
-`test/` is a standalone console project with 503 assertions.
+`test/` is a standalone console project with 527 assertions.
 
 `example/` is a two file project that compiles a module and calls it:
 

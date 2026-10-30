@@ -3,6 +3,7 @@ package hxcpp_jit_r;
 import hxcpp_jit_r.JitCompiler.JitDiag;
 import hxcpp_jit_r.JitCompiler.JitResult;
 import hxcpp_jit_r.JitCompiler.JitMulti;
+import hxcpp_jit_r.JitCompiler.JitFlags;
 import hxcpp_jit_r.JitLoader.JitImage;
 import sys.FileSystem;
 import sys.io.File;
@@ -28,6 +29,7 @@ private typedef JitJob = {
   key:String,
   shift:Int,
   sigs:Array<String>,
+  flags:JitFlags,
   loader:String,
   multi:JitMulti,
   cb:Null<JitModule>->Void,
@@ -258,7 +260,7 @@ class Jit {
     }
     if (!loaded) {
       var t0 = Sys.time();
-      var r = compiler.build(key, src, o == null ? 0 : (o.lineShift ?? 0), o == null ? null : o.sigs, multi);
+      var r = compiler.build(key, src, o == null ? 0 : (o.lineShift ?? 0), o == null ? null : o.sigs, multi, compiler.flags());
       totalBuilds++;
       m.ms = r.ms;
       m.diag = r.diag;
@@ -376,6 +378,7 @@ class Jit {
       key: key,
       shift: o == null ? 0 : (o.lineShift ?? 0),
       sigs: o == null ? null : o.sigs,
+      flags: compiler.flags(),
       loader: o == null || o.loader == null ? loader : o.loader,
       multi: multi,
       cb: cb,
@@ -608,7 +611,7 @@ class Jit {
     var run = function() {
       var r:Null<JitResult> = null;
       try {
-        r = comp.build(j.key, j.src, j.shift, j.sigs, j.multi);
+        r = comp.build(j.key, j.src, j.shift, j.sigs, j.multi, j.flags);
       } catch (e:Dynamic) {}
       j.result = r;
       j.done = true;

@@ -537,7 +537,7 @@ class JitLoader {
       var fnRva = Std.int(JitNative.peek(at(base, addrFuncs + ord * 4), 4));
       if (nameRva <= 0 || nameRva >= img.sizeOfImage || fnRva < 0 || fnRva >= img.sizeOfImage) continue;
       if (nameRva == 0 || fnRva == 0) continue;
-      var nm = readStr(base, nameRva, 256);
+      var nm = readStr(base, nameRva, 256, img.sizeOfImage);
       if (nm == "") continue;
       if (fnRva >= d.rva && fnRva < d.rva + d.size) {
         var fwd = readStr(base, fnRva, 256, img.sizeOfImage);
