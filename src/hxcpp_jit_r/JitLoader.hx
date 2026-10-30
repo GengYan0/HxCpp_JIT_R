@@ -299,6 +299,8 @@ class JitLoader {
         img.ok = false;
         img.error = "entry point outside the image";
         teardownTls(img);
+        unregisterUnwind(img);
+        releaseLibs(img);
         JitNative.vfree(base, img.sizeOfImage);
         img.base = 0;
         return img;
@@ -310,6 +312,8 @@ class JitLoader {
         img.ok = false;
         img.error = "DllMain returned FALSE";
         teardownTls(img);
+        unregisterUnwind(img);
+        releaseLibs(img);
         JitNative.vfree(base, img.sizeOfImage);
         img.base = 0;
         return img;

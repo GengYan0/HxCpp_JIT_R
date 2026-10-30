@@ -318,6 +318,7 @@ class JitElf {
 
     var d = Std.int(dynPh.offset);
     var dynEnd = d + Std.int(dynPh.filesz);
+    if (dynEnd > bytes.length) dynEnd = bytes.length;
     var neededOff:Array<Float> = [];
     var strtabVa = 0.0;
     var symtabVa = 0.0;
@@ -379,7 +380,7 @@ class JitElf {
     }
 
     var symCount = sectionSymCount(bytes, info);
-    if (symCount <= 0) symCount = symbolCount(baseF, hashVa, gnuHashVa);
+    if (symCount <= 0) symCount = symbolCount(baseF, hashVa, gnuHashVa, img.sizeOfImage);
     if (symtabVa != 0 && (symtabVa < 0 || symtabVa + symCount * 24 > img.sizeOfImage)) {
       img.error = "symbol table outside the image";
       JitLoader.releaseImage(img);
@@ -469,17 +470,18 @@ class JitElf {
     return 0;
   }
 
-  static function symbolCount(baseF:Float, hash:Float, gnuHash:Float):Int {
-    if (hash != 0) {
+  static function symbolCount(baseF:Float, hash:Float, gnuHash:Float, limit:Int = 0):Int {
+    var fits = function(off:Float, len:Int):Bool return limit <= 0 || (off >= 0 && off + len <= limit);
+    if (hash != 0 && fits(hash, 8)) {
       var n = Std.int(mpeek(memAt(baseF, hash + 4), 4));
-      if (n > 0 && n < 1000000) return n;
+      if (n > 0 && n < 1000000 && fits(hash, 8 + n * 8)) return n;
     }
-    if (gnuHash != 0) {
+    if (gnuHash != 0 && fits(gnuHash, 16)) {
       var g = memAt(baseF, gnuHash);
       var nbuckets = Std.int(mpeek(g, 4));
       var symoffset = Std.int(mpeek(JitNative.toSizeT(JitNative.toFloat(g) + 4), 4));
       var bloomSize = Std.int(mpeek(JitNative.toSizeT(JitNative.toFloat(g) + 8), 4));
-      if (nbuckets > 0 && nbuckets < 1000000 && bloomSize > 0 && bloomSize < 1000000) {
+      if (nbuckets > 0 && nbuckets < 1000000 && bloomSize > 0 && bloomSize < 1000000 && fits(gnuHash, 16 + bloomSize * 8 + nbuckets * 4)) {
         var buckets = JitNative.toSizeT(JitNative.toFloat(g) + 16 + bloomSize * 8);
         var last = 0;
         for (i in 0...nbuckets) {
@@ -490,7 +492,9 @@ class JitElf {
           var chain = JitNative.toSizeT(JitNative.toFloat(buckets) + nbuckets * 4);
           var idx = last;
           while (idx < 1000000) {
-            var v = Std.int(mpeek(JitNative.toSizeT(JitNative.toFloat(chain) + (idx - symoffset) * 4), 4));
+            var cp = JitNative.toFloat(chain) + (idx - symoffset) * 4;
+            if (!fits(cp - baseF, 4)) break;
+            var v = Std.int(mpeek(JitNative.toSizeT(cp), 4));
             idx++;
             if ((v & 1) != 0) break;
           }
@@ -570,7 +574,14 @@ class JitElf {
       var nameOff = Std.int(mpeek(symE, 4));
       var shndx = Std.int(mpeek(JitNative.toSizeT(JitNative.toFloat(symE) + 6), 2));
       var value = mpeek(JitNative.toSizeT(JitNative.toFloat(symE) + 8), 8);
-      var name = nameOff == 0 ? "" : readMemStr(memAt(baseF, strtab + nameOff));
+      var name = "";
+      if (nameOff > 0) {
+        if (strtab + nameOff >= limit) {
+          img.error = "symbol name outside the image";
+          return false;
+        }
+        name = readMemStr(memAt(baseF, strtab + nameOff));
+      }
       var stInfo = Std.int(mpeek(JitNative.toSizeT(JitNative.toFloat(symE) + 4), 1));
       var isIfunc = (stInfo & 0x0F) == 10;
       var sVal = 0.0;
@@ -636,6 +647,7 @@ class JitElf {
       if (shndx == 0 || shndx >= 0xff00) continue;
       var value = mpeek(JitNative.toSizeT(JitNative.toFloat(symE) + 8), 8);
       if (value == 0) continue;
+      if (strtab + nameOff >= img.sizeOfImage) continue;
       var name = readMemStr(memAt(baseF, strtab + nameOff));
       if (name == "" || img.exports.exists(name)) continue;
       var addr = (stInfo & 0x0F) == 10

@@ -77,7 +77,7 @@ static int rjit_guard_entry(void* entry, void* hinst, unsigned long reason, void
 #endif
 
 #ifndef _WIN32
-#define RJIT_GUARD_DEPTH 8
+#define RJIT_GUARD_DEPTH 64
 
 static thread_local sigjmp_buf rjit_jb[RJIT_GUARD_DEPTH];
 static thread_local int rjit_guard_depth = 0;

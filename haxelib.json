@@ -6,7 +6,7 @@
   "description": "Compile and call native C++ from a hxcpp application at runtime.",
   "version": "0.5.1",
   "classPath": "src",
-  "releasenote": "stable: a wide call reads a second translation unit and reports a name that does not exist",
+  "releasenote": "stable: a call reaches a scanned function through its own signature, and the build cache and its packs are bounded",
   "contributors": ["GengYan0"],
   "dependencies": {}
 }
