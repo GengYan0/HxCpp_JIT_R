@@ -30,15 +30,19 @@ class Main {
   }
 
   static function rmTree(p:String):Void {
-    if (!sys.FileSystem.exists(p)) return;
-    try {
-      if (sys.FileSystem.isDirectory(p)) {
-        for (f in sys.FileSystem.readDirectory(p)) rmTree(p + "/" + f);
-        sys.FileSystem.deleteDirectory(p);
-      } else {
-        sys.FileSystem.deleteFile(p);
-      }
-    } catch (e:Dynamic) {}
+    for (tryNo in 0...4) {
+      if (!sys.FileSystem.exists(p)) return;
+      try {
+        if (sys.FileSystem.isDirectory(p)) {
+          for (f in sys.FileSystem.readDirectory(p)) rmTree(p + "/" + f);
+          if (sys.FileSystem.exists(p)) sys.FileSystem.deleteDirectory(p);
+        } else {
+          sys.FileSystem.deleteFile(p);
+        }
+      } catch (e:Dynamic) {}
+      if (!sys.FileSystem.exists(p)) return;
+      Sys.sleep(0.05);
+    }
   }
 
   static function tmpRoot():String {
@@ -505,7 +509,7 @@ double boom(double v) { if (v > 0) throw std::runtime_error("mapped"); return v;
     eq("loadlib still works", Std.string(lb.callAuto("six", [])), "6");
 
     head("pack export / import");
-    var pf = Jit.exportPack("packout");
+    var pf = Jit.exportPack("packout", ["strs"]);
     ok("export files", pf > 0, pf + " files");
     var pi = Jit.packInfo("packout");
     ok("pack manifest ok", StringTools.startsWith(pi, "pack ok"), pi);
@@ -517,7 +521,7 @@ double boom(double v) { if (v > 0) throw std::runtime_error("mapped"); return v;
     var coldSrc = "double twice(double v) { return v * 2; }\n";
     var c1 = Jit.compile("cold", coldSrc);
     ok("cold compile", c1.ok);
-    Jit.exportPack("packcold");
+    Jit.exportPack("packcold", ["cold"]);
     hxcpp_jit_r.JitToolchain.forceUnavailable = true;
     var coldDir = tmpRoot() + "/rjitcold_" + Std.string(Std.int(Sys.time() * 1000)) + "_" + Std.string(Std.random(1000));
     Jit.setup({cache: coldDir});
@@ -530,6 +534,8 @@ double boom(double v) { if (v > 0) throw std::runtime_error("mapped"); return v;
     ok("cache-only hit", c2.ok && c2.cached, c2.diag.length > 0 ? JitCompiler.describe(c2.diag[0]) : ("cached=" + c2.cached));
     eq("cache-only call", Std.string(c2.callAuto("twice", [21])), "42");
     hxcpp_jit_r.JitToolchain.forceUnavailable = false;
+    Jit.dispose("cold");
+    for (i in 0...5) Jit.tick();
     rmTree(coldDir);
     Jit.setup({cache: "jitcache"});
     ok("toolchain restored", Jit.ready);
@@ -1370,6 +1376,11 @@ double read() { return got; }
     var broken = 0;
     for (x in Jit.all()) if (!x.ok) broken++;
     ok("no broken modules", broken == 0, broken + " broken");
+
+    rmTree("packout");
+    rmTree("packcold");
+    rmTree("multitu");
+    rmTree("watchme.cpp");
 
     out.add("\n[jit] RESULT " + (fail == 0 ? "PASS" : "FAIL") + "  (" + pass + " passed, " + fail + " failed)\n");
     out.add(Jit.stats());

@@ -787,11 +787,19 @@ class Jit {
     return n;
   }
 
-  public static function exportPack(dir:String):Int {
+  public static function exportPack(dir:String, ?only:Array<String>):Int {
     if (cache == null) ensure();
     if (cache == null) return 0;
-    prefetch();
-    return JitPack.exportPack(cache.root, dir);
+    if (only == null) prefetch();
+    var map:Map<String, Bool> = null;
+    if (only != null && only.length > 0) {
+      map = new Map();
+      for (k in only) {
+        var m = mods.get(k);
+        map.set(m == null ? k : m.key, true);
+      }
+    }
+    return JitPack.exportPack(cache.root, dir, map);
   }
 
   public static function importPack(dir:String):Int {

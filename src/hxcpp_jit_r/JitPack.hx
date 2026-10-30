@@ -10,11 +10,12 @@ typedef PackEntry = {
 }
 
 class JitPack {
-  public static function manifest(root:String):String {
+  public static function manifest(root:String, only:Map<String, Bool> = null):String {
     var list:Array<PackEntry> = [];
     var dirs = safeList(root);
     for (d in dirs) {
       if (d == "pch") continue;
+      if (only != null && !only.exists(d)) continue;
       var p = root + "/" + d;
       if (!FileSystem.isDirectory(p)) continue;
       for (f in safeList(p)) {
@@ -67,7 +68,7 @@ class JitPack {
     if (FileSystem.exists(h)) {
       if (copyFile(h, target + "/rjit_abi.h")) n++;
     }
-    File.saveContent(target + "/manifest.json", manifest(root));
+    File.saveContent(target + "/manifest.json", manifest(root, only));
     return n;
   }
 
