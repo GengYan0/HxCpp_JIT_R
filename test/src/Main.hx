@@ -956,6 +956,7 @@ double alive() { return counter + hits[1]; }
     eq("relr direct slot", Std.string(Std.int(tg[0])), "4096");
     eq("relr bitmap slot", Std.string(Std.int(tg[1])), "4104");
     eq("relr resumes", Std.string(Std.int(tg[2])), "8192");
+    eq("a table longer than the file stops at the file end", Std.string(JitElf.relrTargets(rb, 0, 999999).length), "3");
 
     head("signature mapping");
     var sfns = JitScan.functions("int fill(char** out) { return 0; }\nlong big(unsigned long v) { return v; }\nint blen(const unsigned char* p, int n) { return n; }\nint cstrlen(const char* s) { return 0; }\n");

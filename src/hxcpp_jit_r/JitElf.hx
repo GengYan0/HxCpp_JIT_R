@@ -156,7 +156,10 @@ class JitElf {
 
   public static function relrTargets(b:haxe.io.Bytes, off:Int, size:Int):Array<Float> {
     var out:Array<Float> = [];
+    if (off < 0 || off >= b.length) return out;
     var n = Std.int(size / 8);
+    var room = Std.int((b.length - off) / 8);
+    if (n > room) n = room;
     var addr = 0.0;
     var started = false;
     for (i in 0...n) {
@@ -287,6 +290,11 @@ class JitElf {
       img.tlsIndex = tlsId;
     }
     for (ph in loads) {
+      if (ph.filesz > ph.memsz) {
+        img.error = "segment " + Std.int(ph.vaddr) + " is larger on disk than in memory";
+        JitLoader.releaseImage(img);
+        return img;
+      }
       var dst = JitNative.toSizeT(baseF + ph.vaddr);
       var len = Std.int(ph.filesz);
       if (len > 0) {
@@ -404,6 +412,11 @@ class JitElf {
         return img;
       }
       for (t in rt) {
+        if (t < 0 || t + 8 > img.sizeOfImage) {
+          img.error = "packed relocation target outside the image at " + Std.int(t);
+          JitLoader.releaseImage(img);
+          return img;
+        }
         var at = JitNative.toSizeT(baseF + t);
         JitNative.poke(at, 8, JitNative.peek(at, 8) + baseF);
         img.relocCount++;

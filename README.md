@@ -856,7 +856,7 @@ Time goes into compiler process startup and linking, not into the amount of code
 - A default argument must be a literal, such as a number, a quoted string, `true`, `false` or `nullptr`; a name from a header puts the function in `module.skipped`
 - An enum type is read as an `int`, for arguments and returns
 - `JitNative.peek` and `JitNative.poke` take any address and no check stands between them and the process 
-- A guard that fires abandons the faulting frame without unwinding it, so the module is marked `poisoned`, every later call returns zero and the first one reports it; reload the module to use it again (`Jit.poisonOnFault = false` keeps the old behaviour)
+- A guard that fires abandons the faulting frame without unwinding it, so the module is marked `poisoned`, every later call through `call`, `callAuto`, `callSig`, `callWide` or a bound handle returns zero and the first one reports it; reads and writes of globals still work, for inspection. Reload the module to use it again (`Jit.poisonOnFault = false` keeps the old behaviour)
 - A C++ exception that the boundary caught is not a fault: the frame unwinds, the message reaches the log, and the module stays usable
 - On Windows `long` is 32 bits, so an argument above 2^31 truncates in the call itself, exactly as it does in C++; use `long long` or `int64_t` for a value that needs 64
 - A callback stub keeps its image mapped for the process, because native code holds its address
@@ -884,7 +884,7 @@ Time goes into compiler process startup and linking, not into the amount of code
 
 ## Testing
 
-`test/` is a standalone console project with 494 assertions.
+`test/` is a standalone console project with 495 assertions.
 
 `example/` is a two file project that compiles a module and calls it:
 

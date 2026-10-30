@@ -59,7 +59,9 @@ class JitImage {
 
   public function summary():String {
     if (!ok) return "image " + path + " FAILED: " + error;
-    return 'image $path base=0x${StringTools.hex(Std.int(base), 0)} image=${sizeOfImage}B sections=${sections.length} exports=${Lambda.count(exports)} imports=${imports.length} reloc=$relocCount rebased=$rebased manual=$manual';
+    var hi = JitNative.hiOf64(JitNative.toFloat(base)) & 0xFFFFF;
+    var addr = StringTools.hex(hi, 0) + StringTools.hex(JitNative.loOf64(JitNative.toFloat(base)), 8);
+    return 'image $path base=0x$addr image=${sizeOfImage}B sections=${sections.length} exports=${Lambda.count(exports)} imports=${imports.length} reloc=$relocCount rebased=$rebased manual=$manual';
   }
 }
 
@@ -101,7 +103,8 @@ class JitLoader {
     return v >= 0 ? v * 1.0 : v + 4294967296.0;
   }
 
-  static function readStr(base:cpp.SizeT, rva:Int, max:Int = 512):String {
+  static function readStr(base:cpp.SizeT, rva:Int, max:Int = 512, limit:Int = 0):String {
+    if (limit > 0 && rva + max > limit) max = limit - rva;
     var b = new StringBuf();
     var i = 0;
     while (i < max) {
@@ -378,7 +381,7 @@ class JitLoader {
         releaseLibs(img);
         return false;
       }
-      var dll = readStr(base, nameRva);
+      var dll = readStr(base, nameRva, 512, img.sizeOfImage);
       if (dll == "") {
         img.ok = false;
         img.error = "import descriptor has no module name";
@@ -533,7 +536,7 @@ class JitLoader {
       var nm = readStr(base, nameRva, 256);
       if (nm == "") continue;
       if (fnRva >= d.rva && fnRva < d.rva + d.size) {
-        var fwd = readStr(base, fnRva, 256);
+        var fwd = readStr(base, fnRva, 256, img.sizeOfImage);
         if (fwd != "") img.forwarders.set(nm, fwd);
       } else {
         img.exports.set(nm, JitNative.toFloat(base) + fnRva);
