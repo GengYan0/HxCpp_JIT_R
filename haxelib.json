@@ -2,11 +2,24 @@
   "name": "hxcpp_jit_r",
   "url": "https://github.com/GengYan0/HxCpp_JIT_R",
   "license": "MIT",
-  "tags": ["cpp", "jit", "native", "windows", "linux", "msvc", "runtime", "hot-reload"],
+  "tags": [
+    "cpp",
+    "haxe",
+    "hot-reload",
+    "hxcpp",
+    "jit",
+    "linux",
+    "msvc",
+    "native",
+    "runtime",
+    "windows"
+  ],
   "description": "Compile and call native C++ from a hxcpp application at runtime.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "classPath": "src",
-  "releasenote": "1.0.0: a 64 bit result keeps its sign, long follows the width of the platform, each module holds its own copy of a shared source, and the cache leaves no linker exports behind.",
-  "contributors": ["GengYan0"],
+  "releasenote": "1.0.1: the install section names the haxelib command, and the package carries the haxe and hxcpp tags so a search finds it.",
+  "contributors": [
+    "GengYan0"
+  ],
   "dependencies": {}
 }

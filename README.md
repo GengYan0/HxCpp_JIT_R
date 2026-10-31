@@ -1,6 +1,6 @@
 # HxCpp_JIT_R
 
-1.0.0
+1.0.1
 
 Compile and call native C++ while your application is running. Hand it a source string, get a module back, call its functions like any Haxe method.
 
@@ -62,12 +62,20 @@ On Windows `cl.exe` and the Windows SDK must be reachable. The first call scans 
 ## Install
 
 ```bash
-haxelib dev hxcpp_jit_r /path/to/HxCpp_JIT_R
+haxelib install hxcpp_jit_r
 ```
 
 ```xml
 <haxelib name="hxcpp_jit_r"/>
 ```
+
+To work on the library itself, link a checkout instead of the released copy:
+
+```bash
+haxelib dev hxcpp_jit_r /path/to/HxCpp_JIT_R
+```
+
+`haxelib dev` takes priority over an installed release, so the checkout is used until you leave the link with `haxelib dev hxcpp_jit_r`.
 
 Optional, to include the package and run a self check at boot:
 
