@@ -604,6 +604,23 @@ int ids[3];
       Jit.dispose("fieldwidth");
     }
 
+    head("wide struct fields");
+    var wssrc = "struct WP { long a; unsigned long b; long long c; double d; };\nWP wp;\nWP wmk(int a, int b) { WP r; r.a = (long)a; r.b = (unsigned long)b; r.c = (long long)a * 1000; r.d = a + 0.5; return r; }\n";
+    var ws = Jit.compile("widestruct", wssrc);
+    ok("a struct with a long compiles", ws.ok, ws.diag.length > 0 ? JitCompiler.describe(ws.diag[0]) : ws.log);
+    if (ws.ok) {
+      ws.set("wp.a", -7);
+      eq("a long field keeps its sign", Std.string(ws.get("wp.a")), "-7");
+      ws.set("wp.b", -1);
+      eq("an unsigned long field wraps", Std.string(ws.get("wp.b")), "4294967295");
+      ws.set("wp.c", -9);
+      eq("a long long field keeps its sign", Std.string(ws.get("wp.c")), "-9");
+      var wr = ws.callStruct("wmk", [-2, 5]);
+      eq("a returned struct long field", Std.string(wr.readI32(0)), "-2");
+      eq("a returned struct unsigned field", Std.string(wr.readI32(4)), "5");
+      Jit.dispose("widestruct");
+    }
+
     head("64 bit returns keep their sign");
     var lsrc = "long long rneg() { return -1; }\nlong long rmin() { return -9223372036854775807LL - 1; }\nlong long radd(long long a, long long b) { return a + b; }\nlong rl() { return -5; }\n";
     var lm = Jit.compile("longsign", lsrc);

@@ -1,6 +1,6 @@
 # HxCpp_JIT_R
 
-0.5.1
+1.0.0
 
 Compile and call native C++ while your application is running. Hand it a source string, get a module back, call its functions like any Haxe method.
 
@@ -879,6 +879,9 @@ Time goes into compiler process startup and linking, not into the amount of code
 - `rjit_init` returning non zero fails the load and leaves the module unusable
 - Default arguments are filled from the declaration, so a call may pass fewer arguments than the signature lists
 - Overloads resolve by argument count, then by runtime argument types through `callDyn`; when two candidates score the same, `callDyn` reports it and the call needs `callSig`
+- Two modules built from the same source each get their own binary, so their globals are separate; compiling under a name that is already live replaces that module and disposes the old one
+- The scanner reads one function definition per line: `class K { int f() { return 1; } int g() { return 2; } };` registers `f` only; put `g` on its own line
+- A variable of an anonymous struct type (`struct { int q; } v;`) is skipped, because its fields have no name to reach them by
 - Every guarded call costs an indirect jump; `callFast` removes the fault guard but also removes crash containment
 - A fault caught on Linux leaves the C++ runtime as it was at the moment of the signal; a destroyed lock or a half written buffer is not repaired
 - Compilation needs a local compiler; target machines fall back to the cache
@@ -899,9 +902,9 @@ Time goes into compiler process startup and linking, not into the amount of code
 
 ## Testing
 
-`test/` is a standalone console project with 527 assertions.
+`test/` is a standalone console project with 574 assertions, green both on a warm cache and from an empty temporary directory.
 
-`example/` is a two file project that compiles a module and calls it:
+`example/` is a single file project that compiles a module and calls it:
 
 ```
 cd example
