@@ -13,7 +13,7 @@ typedef JitLeaf = {
 }
 
 class JitCodegen {
-  public static inline var BUILD:Int = 35;
+  public static inline var BUILD:Int = 36;
   public static inline var MAX_DEPTH:Int = 3;
 
   public static function emit(fns:Array<JitFnInfo>, vars:Array<JitVarInfo>, extra:Array<String> = null, structs:Array<JitStructInfo> = null, externs:Array<String> = null):String {
@@ -287,7 +287,8 @@ class JitCodegen {
     var call = ret == "v"
       ? body + "; return 0.0;"
       : (wide && ret == "l" ? "return rjit_i64_bits(" + body + ");" : "return " + retCast(ret) + body + ";");
-    return 'extern "C" RJIT_API double ' + name + '(RJitCtx* ctx, void* f, RJitArgs* a) { try { ' + call + ' } catch (const std::exception& e) { RJIT_ERRN(e.what(), (int)strlen(e.what())); return rjit_nan_val(); } catch (...) { return rjit_nan_val(); } }' + "\n";
+    var errRet = wide && ret == "l" ? "rjit_fault_val()" : "rjit_nan_val()";
+    return 'extern "C" RJIT_API double ' + name + '(RJitCtx* ctx, void* f, RJitArgs* a) { try { ' + call + ' } catch (const std::exception& e) { RJIT_ERRN(e.what(), (int)strlen(e.what())); return ' + errRet + '; } catch (...) { return ' + errRet + '; } }' + "\n";
   }
 
   public static function pointee(raw:String):String {
@@ -429,7 +430,8 @@ class JitCodegen {
     var a = argParts(f, "a", wide);
     var fnty = retType(f.ret) + "(*)(" + a.types.join(",") + ")";
     var name = wide ? wideNameOf(f) : dispNameOf(f.name, f.sig);
-    return 'extern "C" RJIT_API double ' + name + '(RJitCtx* ctx, void* f, RJitArgs* a) { try { ' + body(f, a, fnty, wide) + ' } catch (const std::exception& e) { RJIT_ERRN(e.what(), (int)strlen(e.what())); return rjit_nan_val(); } catch (...) { return rjit_nan_val(); } }' + "\n";
+    var er = wide && f.ret == "l" ? "rjit_fault_val()" : "rjit_nan_val()";
+    return 'extern "C" RJIT_API double ' + name + '(RJitCtx* ctx, void* f, RJitArgs* a) { try { ' + body(f, a, fnty, wide) + ' } catch (const std::exception& e) { RJIT_ERRN(e.what(), (int)strlen(e.what())); return ' + er + '; } catch (...) { return ' + er + '; } }' + "\n";
   }
 
   static function cppType(c:String):String {

@@ -1,7 +1,7 @@
 package hxcpp_jit_r;
 
 class JitAbi {
-  public static inline var VERSION:Int = 14;
+  public static inline var VERSION:Int = 15;
 
   public static var HEADER:String = '#ifndef RJIT_ABI_H
 #define RJIT_ABI_H
@@ -9,7 +9,7 @@ class JitAbi {
 #include <string.h>
 #include <stdlib.h>
 
-#define RJIT_ABI_VERSION 14
+#define RJIT_ABI_VERSION 15
 
 #ifdef __cplusplus
 #include <limits>
@@ -31,6 +31,13 @@ static inline long long rjit_bits_i64(double v) {
 static inline double rjit_i64_bits(long long v) {
   double d = 0.0;
   memcpy(&d, &v, 8);
+  return d;
+}
+
+static inline double rjit_fault_val() {
+  unsigned long long bits = 0x7FF80000DEAD0001ULL;
+  double d = 0.0;
+  memcpy(&d, &bits, 8);
   return d;
 }
 #endif

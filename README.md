@@ -777,7 +777,7 @@ if (!m.ok) {
 
 Signatures use `returnCode(argumentCodes)`: `d(dd)`, `i(is)`, `i(SS)`, `S(S)`, `v()`.
 
-The `l` row covers `long long`, `long`, `size_t`, `ptrdiff_t`, `intptr_t`, `uintptr_t`, `int64_t` and `uint64_t`, with or without a `signed` or `unsigned` prefix. `long` is 32 bits on Windows and 64 on Linux and macOS, and the scanner reads it as 64 everywhere because widening is safe; the value still truncates at the call on Windows, exactly as it does in C++. Their values cross the numeric slots as doubles, so the ordinary call path keeps 53 bits; `callWide` passes the full 64 and returns an `Int64`.
+The `l` row covers `long long`, `size_t`, `ptrdiff_t`, `intptr_t`, `uintptr_t`, `int64_t` and `uint64_t`, with or without a `signed` or `unsigned` prefix. `long` is 64 bits on Linux and macOS and 32 on Windows, so it maps to `l` on the first two and to `i` or `u` on Windows, matching the width the compiler gives it. Their values cross the numeric slots as doubles, so the ordinary call path keeps 53 bits; `callWide` passes the full 64 and returns an `Int64`.
 
 ```haxe
 var m = Jit.compile("wide", '
@@ -870,7 +870,8 @@ Time goes into compiler process startup and linking, not into the amount of code
 - `JitNative.peek` and `JitNative.poke` take any address and no check stands between them and the process 
 - A guard that fires abandons the faulting frame without unwinding it, so the module is marked `poisoned`, every later call through `call`, `callAuto`, `callSig`, `callWide` or a bound handle returns zero and the first one reports it; reads and writes of globals still work, for inspection. Reload the module to use it again (`Jit.poisonOnFault = false` keeps the old behaviour)
 - A C++ exception that the boundary caught is not a fault: the frame unwinds, the message reaches the log, and the module stays usable
-- On Windows `long` is 32 bits, so an argument above 2^31 truncates in the call itself, exactly as it does in C++; use `long long` or `int64_t` for a value that needs 64
+- On Windows `long` is 32 bits, so it maps to `i` or `u` and an argument above 2^31 truncates in the call itself, exactly as it does in C++; use `long long` or `int64_t` for a value that needs 64
+- A `long long` result crosses `callWide` as raw bits, so a negative value is a legal payload and is never reported as a fault; only the bit pattern `0x7FF80000DEAD0001` marks a fault, which `JitNative.isFault` recognises
 - A callback stub keeps its image mapped for the process, because native code holds its address
 - Struct results arrive as an owned copy; the raw address `callAuto` returns stays readable for eight further struct results
 - `rjit_init` returning non zero fails the load and leaves the module unusable

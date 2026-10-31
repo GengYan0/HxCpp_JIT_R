@@ -560,6 +560,18 @@ int ids[3];
       "n=" + mok.length + " missing=" + mmMissing + (mm.ok ? "" : " " + (mm.diag.length > 0 ? JitCompiler.describe(mm.diag[0]) : mm.log)));
     Jit.dispose("sigmatrix");
 
+    head("64 bit returns keep their sign");
+    var lsrc = "long long rneg() { return -1; }\nlong long rmin() { return -9223372036854775807LL - 1; }\nlong long radd(long long a, long long b) { return a + b; }\nlong rl() { return -5; }\n";
+    var lm = Jit.compile("longsign", lsrc);
+    ok("a negative long long compiles", lm.ok, lm.diag.length > 0 ? JitCompiler.describe(lm.diag[0]) : lm.log);
+    if (lm.ok) {
+      eq("a negative long long is not read as a fault", Std.string(lm.callWide("rneg", [])), "-1");
+      eq("the smallest long long survives", Std.string(lm.callWide("rmin", [])), "-9223372036854775808");
+      eq("a negative sum comes back negative", Std.string(lm.callWide("radd", [haxe.Int64.ofInt(-2), haxe.Int64.ofInt(-3)])), "-5");
+      eq("a negative long keeps its sign", Std.string(lm.callWide("rl", [])), "-5");
+      Jit.dispose("longsign");
+    }
+
     head("manual loader");    var manSrc = "int sq(int x) { return x * x; }\nint add3(int a, int b, int c) { return a + b + c; }\ndouble half(double v) { return v / 2; }\n";
     var mp = Jit.compile("man", manSrc, {loader: "manual"});
     ok("manual compile+load", mp.ok, mp.diag.length > 0 ? JitCompiler.describe(mp.diag[0]) : "");
@@ -1104,7 +1116,8 @@ double alive() { return counter + hits[1]; }
       return "";
     };
     eq("char** is a pointer", sigOf("fill"), "i(p)");
-    eq("unsigned long is wide", sigOf("big"), "l(l)");
+    var longCode = JitPlatform.win ? "i" : "l";
+    eq("unsigned long matches the width of the platform", sigOf("big"), longCode + "(" + (JitPlatform.win ? "u" : "l") + ")");
     eq("unsigned char* is a pointer", sigOf("blen"), "i(pi)");
     eq("const char* stays a string", sigOf("cstrlen"), "i(s)");
     var sgv = JitScan.globals("std::string names[4];\nint plain;\n");
@@ -1119,7 +1132,7 @@ double alive() { return counter + hits[1]; }
     var qb = JitScan.functions('const char* s = "a{b";\nchar c = \'{\';\nint afterbrace() { return 1; }\n');
     eq("a brace inside a literal does not open a scope", [for (f in qb) f.name].join(","), "afterbrace");
     eq("signed long long is wide", JitScan.code("signed long long"), "l");
-    eq("signed long is wide", JitScan.code("signed long"), "l");
+    eq("signed long matches the width of the platform", JitScan.code("signed long"), longCode);
     eq("signed int is signed", JitScan.code("signed int"), "i");
     eq("size_t is wide", JitScan.code("size_t"), "l");
     eq("unsigned long long int is wide", JitScan.code("unsigned long long int"), "l");

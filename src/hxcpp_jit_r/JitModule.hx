@@ -868,6 +868,18 @@ class JitModule {
       ? JitNative.callViaB(d, fp, ctx, slots.length, a(slots, 0), a(slots, 1), a(slots, 2), a(slots, 3), a(slots, 4), a(slots, 5),
           bytesOf(texts, 0), bytesOf(texts, 1), bytesOf(texts, 2), bytesOf(texts, 3))
       : JitNative.callVia(d, fp, ctx, slots.length, a(slots, 0), a(slots, 1), a(slots, 2), a(slots, 3), a(slots, 4), a(slots, 5));
+    if (ret == "l") {
+      if (JitNative.isFault(r) != 0) {
+        if (Jit.poisonOnFault) {
+          poisoned = true;
+          JitHost.error("callWide", n, "the call faulted, the module is marked unusable, reload it");
+        } else {
+          JitHost.error("callWide", n, "native exception caught");
+        }
+        return haxe.Int64.ofInt(0);
+      }
+      return haxe.Int64.make(JitNative.hiOf64(r), JitNative.loOf64(r));
+    }
     if (r != r) {
       if (JitNative.isFault(r) != 0 && Jit.poisonOnFault) {
         poisoned = true;
@@ -877,7 +889,6 @@ class JitModule {
       }
       return haxe.Int64.ofInt(0);
     }
-    if (ret == "l") return haxe.Int64.make(JitNative.hiOf64(r), JitNative.loOf64(r));
     return haxe.Int64.fromFloat(r);
   }
 

@@ -628,10 +628,15 @@ class JitScan {
     for (t in ["unsigned", "unsigned int", "uint32_t"]) m.set(t, "u");
     for (t in ["long long", "long long int", "signed long long", "signed long long int",
                "unsigned long long", "unsigned long long int", "long long unsigned int",
-               "long", "long int", "signed long", "signed long int",
-               "unsigned long", "unsigned long int", "long unsigned int",
                "int64_t", "uint64_t", "size_t", "ssize_t", "ptrdiff_t",
                "intptr_t", "uintptr_t", "intmax_t", "uintmax_t"]) m.set(t, "l");
+    if (JitPlatform.win) {
+      for (t in ["long", "long int", "signed long", "signed long int"]) m.set(t, "i");
+      for (t in ["unsigned long", "unsigned long int", "long unsigned int"]) m.set(t, "u");
+    } else {
+      for (t in ["long", "long int", "signed long", "signed long int",
+                 "unsigned long", "unsigned long int", "long unsigned int"]) m.set(t, "l");
+    }
     typeTable = m;
     return m;
   }
