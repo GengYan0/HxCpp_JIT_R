@@ -6,9 +6,8 @@ Compile and call native C++ while your application is running. Hand it a source 
 
 Behind the call the source goes into a cache directory, is compiled into a shared library, loaded, and invoked through a small flat C ABI generated for you.
 
-> **Note**: This library is heavily AI‑assisted, with human review and testing.
-> It is mainly aimed at personal projects and experimental use. You are welcome to use it, though please be aware of potential edge‑case bugs. I will actively maintain this repository.
-————————————————————————————————
+> **Note**: This library is built with AI assistance, and reviewed and tested by hand. It is a stable release: everything outside the limits listed below is covered by the test suite. You are welcome to use it, and any bug that turns up will be fixed promptly.
+> ————————————————————————————————
 ## Features
 
 - Runtime compilation of C++ source into a `.dll` / `.so`, then load and call it
