@@ -881,7 +881,7 @@ Time goes into compiler process startup and linking, not into the amount of code
 - Two modules built from the same source each get their own binary, so their globals are separate; compiling under a name that is already live replaces that module and disposes the old one
 - The scanner reads one function definition per line: `class K { int f() { return 1; } int g() { return 2; } };` registers `f` only; put `g` on its own line
 - A variable of an anonymous struct type (`struct { int q; } v;`) is skipped, because its fields have no name to reach them by
-- `JitSession.eval` appends to the session source, so evaluating the same declaration twice is a redefinition error; `redeclare` replaces a name and `reset` starts over
+- `JitSession.eval` appends to the session source, so evaluating the same declaration twice is a redefinition error; `redeclare` swaps the whole source for the new code and starts it from its own initial values, and `reset` clears the source
 - An expression is evaluated in double precision, and a bitwise operator truncates to 32 bits; it is a diagnostic aid rather than a replacement for compiled code
 - Every guarded call costs an indirect jump; `callFast` removes the fault guard but also removes crash containment
 - A fault caught on Linux leaves the C++ runtime as it was at the moment of the signal; a destroyed lock or a half written buffer is not repaired
@@ -903,7 +903,7 @@ Time goes into compiler process startup and linking, not into the amount of code
 
 ## Testing
 
-`test/` is a standalone console project with 582 assertions, green both on a warm cache and from an empty temporary directory.
+`test/` is a standalone console project with 591 assertions, green both on a warm cache and from an empty temporary directory.
 
 `example/` is a single file project that compiles a module and calls it:
 

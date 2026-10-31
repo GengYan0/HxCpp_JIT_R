@@ -621,6 +621,20 @@ int ids[3];
       Jit.dispose("widestruct");
     }
 
+    head("session redeclaration");
+    var rs = new JitSession("redecl");
+    eq("first declaration is accepted", Std.string(rs.eval("int hp = 10;")), "true");
+    eq("its value is there", Std.string(rs.get("hp")), "10");
+    eq("the same declaration twice is refused", Std.string(rs.eval("int hp = 20;")), "false");
+    eq("the refused one changes nothing", Std.string(rs.get("hp")), "10");
+    eq("redeclare is accepted", Std.string(rs.redeclare("int hp = 20;")), "true");
+    eq("redeclare takes the new initial value", Std.string(rs.get("hp")), "20");
+    eq("redeclare swapped the source", Std.string(rs.source.indexOf("10")), "-1");
+    rs.reset();
+    eq("reset clears the source", Std.string(rs.source.indexOf("hp")), "-1");
+    eq("a cleared session has no names", Std.string(rs.vars().length), "0");
+    rs.dispose();
+
     head("address and table placement");
     eq("every hex digit of a wide address is kept", JitLoader.hex64(4503599627370496.0), "10000000000000");
     eq("a small address still prints short", JitLoader.hex64(291.0), "123");

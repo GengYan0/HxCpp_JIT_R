@@ -34,17 +34,17 @@ class JitSession {
   }
 
   public function redeclare(code:String):Bool {
-    return run(code + "\n");
+    return run(code + "\n", false);
   }
 
-  function run(full:String):Bool {
-    if (!rebuild(full)) return false;
+  function run(full:String, keepState:Bool = true):Bool {
+    if (!rebuild(full, keepState)) return false;
     source = full;
     return true;
   }
 
-  function rebuild(full:String):Bool {
-    var keep = snapshot();
+  function rebuild(full:String, keepState:Bool = true):Bool {
+    var keep = keepState ? snapshot() : null;
     var m = Jit.compile(name, full, {force: true});
     diag = m.diag;
     if (!m.ok) {
@@ -52,7 +52,7 @@ class JitSession {
       return false;
     }
     module = m;
-    restore(keep);
+    if (keep != null) restore(keep);
     evals++;
     lastError = "";
     return true;
