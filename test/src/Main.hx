@@ -255,6 +255,7 @@ RJIT(macroonly) { return 7; }
     var hc2 = new hxcpp_jit_r.JitCache(hdrDir);
     ok("stale header replaced", hc2.prepare(), "");
     eq("header content restored", sys.io.File.getContent(hc2.headerFile()) == hxcpp_jit_r.JitAbi.HEADER ? "yes" : "no", "yes");
+    rmTree(hdrDir);
 
     head("auto signature");
     var sc = hxcpp_jit_r.JitScan.functions("double half(double x) { return x / 2; }\nint c2 = 5;\n");
@@ -581,6 +582,8 @@ double boom(double v) { if (v > 0) throw std::runtime_error("mapped"); return v;
     }
     ok("concurrent cold build", done == 4, "done=" + done + " pending=" + Jit.pending() + " ticks=" + spin + (faults.length > 0 ? " " + faults.join(" | ") : ""));
     Jit.maxParallel = 2;
+    for (i in 0...4) Jit.dispose("conc" + i);
+    for (i in 0...5) Jit.tick();
     rmTree(cdir);
     Jit.setup({cache: oldCache});
     ok("cache restored", Jit.cache.root.indexOf("jitcache") >= 0, Jit.cache.root);
