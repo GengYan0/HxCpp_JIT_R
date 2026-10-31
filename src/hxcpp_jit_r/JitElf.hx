@@ -431,6 +431,9 @@ class JitElf {
     img.initArrSize = Std.int(initArrSz);
     img.finiArr = addrOf(baseF, finiArrVa);
     img.finiArrSize = Std.int(finiArrSz);
+    var room = img.sizeOfImage;
+    if (img.initArr != 0 && img.initArrSize > room - Std.int(initArrVa)) img.initArrSize = room - Std.int(initArrVa);
+    if (img.finiArr != 0 && img.finiArrSize > room - Std.int(finiArrVa)) img.finiArrSize = room - Std.int(finiArrVa);
 
     JitNative.flushIcache(alloc, total);
     protect(img, loads, baseF);
