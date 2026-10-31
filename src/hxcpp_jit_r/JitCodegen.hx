@@ -191,7 +191,7 @@ class JitCodegen {
     if (s.indexOf(")") != s.length - 1) return false;
     var ret = s.substr(0, p);
     if (ret.length != 1 || "dfbchiulpsSv".indexOf(ret) < 0) return false;
-    if (ret == "S" || ret == "v" && false) return false;
+    if (ret == "S") return false;
     var args = s.substr(p + 1, s.length - p - 2);
     if (args.length > 6) return false;
     var strs = 0;

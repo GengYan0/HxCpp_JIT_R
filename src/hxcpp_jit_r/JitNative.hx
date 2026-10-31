@@ -452,8 +452,9 @@ extern "C" RJIT_HOST_EXPORT void rjit_pump(void) {
     int textLen = 0;
     if (isStr) {
       ::String s = ::hxcpp_jit_r::JitNative_obj::onCallStr((int)(size_t)m, ::String::create(name, len), a0, a1, a2, a3);
-      const char* u = s.utf8_str();
-      size_t ul = u == 0 ? 0 : strlen(u);
+      int blen = 0;
+      const char* u = s.utf8_str(0, true, &blen);
+      size_t ul = u == 0 || blen < 0 ? 0 : (size_t)blen;
       textLen = (int)ul;
       text = (char*)malloc(ul + 1);
       if (text != 0) {
@@ -491,9 +492,10 @@ extern "C" RJIT_HOST_EXPORT const char* rjit_host_str(void* m, const char* n, in
   RJitHost* t = rjit_host_table.load(std::memory_order_acquire);
   if (t == 0) return held.c_str();
   if (rjit_on_host()) {
+    int blen = 0;
     ::String s = ::hxcpp_jit_r::JitNative_obj::onCallStr((int)(size_t)m, ::String::create(n, len), a0, a1, a2, a3);
-    const char* u = s.utf8_str();
-    if (u != 0) held.assign(u);
+    const char* u = s.utf8_str(0, true, &blen);
+    if (u != 0 && blen > 0) held.assign(u, (size_t)blen);
     return held.c_str();
   }
   char* text = 0;
@@ -682,8 +684,9 @@ class JitNative {
   @:functionCode('
 #ifdef _WIN32
     wchar_t buf[512];
-    DWORD n = FormatMessageW(0x00001000 | 0x00000800, 0, (DWORD)code, 0, buf, 512, 0);
+    DWORD n = FormatMessageW(0x00001000 | 0x00000800, 0, (DWORD)code, 0, buf, 511, 0);
     if (n == 0) return ::String("");
+    buf[n < 511 ? n : 511] = 0;
     while (n > 0 && (buf[n - 1] == 10 || buf[n - 1] == 13 || buf[n - 1] == 32)) n--;
     buf[n] = 0;
     return ::String(buf);
@@ -877,9 +880,10 @@ class JitNative {
     int n = bytes->length;
     if (n <= 0) return ::String("");
 #ifndef _WIN32
-    return bytes->toString();
+    const char* fsrc = (const char*)bytes->b->Pointer();
+    if (fsrc == 0) return ::String("");
+    return ::String::create(fsrc, n);
 #else
-    if (n < 0) return ::String("");
     const char* src = (const char*)bytes->b->Pointer();
     if (src == 0) return ::String("");
     int wl = MultiByteToWideChar((UINT)cp, 0, src, n, 0, 0);
@@ -927,9 +931,9 @@ class JitNative {
     if (!VirtualProtect((void*)(size_t)p, (SIZE_T)size, (DWORD)prot, &old)) return -1;
     return (int)old;
 #else
-    int q = ((prot & (0x02 | 0x04 | 0x20 | 0x40)) != 0 ? PROT_READ : 0)
-          | ((prot & (0x04 | 0x40)) != 0 ? PROT_WRITE : 0)
-          | ((prot & (0x10 | 0x20 | 0x40)) != 0 ? PROT_EXEC : 0);
+    int q = ((prot & (0x02 | 0x04 | 0x08 | 0x20 | 0x40 | 0x80)) != 0 ? PROT_READ : 0)
+          | ((prot & (0x04 | 0x08 | 0x40 | 0x80)) != 0 ? PROT_WRITE : 0)
+          | ((prot & (0x10 | 0x20 | 0x40 | 0x80)) != 0 ? PROT_EXEC : 0);
     if (q == 0) q = PROT_NONE;
     if (mprotect((void*)(size_t)p, (size_t)size, q) != 0) return -1;
     return 0;

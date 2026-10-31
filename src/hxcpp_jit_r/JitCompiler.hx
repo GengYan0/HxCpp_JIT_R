@@ -410,8 +410,8 @@ class JitCompiler {
     }
     return {
       code: code,
-      out: ob == null ? "" : ob.toString(),
-      err: eb == null ? "" : eb.toString()
+      out: ob == null ? "" : ob.getString(0, ob.length, haxe.io.Encoding.UTF8),
+      err: eb == null ? "" : eb.getString(0, eb.length, haxe.io.Encoding.UTF8)
     };
   }
 

@@ -392,7 +392,10 @@ class JitScan {
       if (raw.length == 0) continue;
       var s = StringTools.trim(raw);
       if (s == "" || s.charAt(0) == "#") continue;
-      if (s.indexOf("(") >= 0) continue;
+      if (s.indexOf("(") >= 0) {
+        var eq0 = s.indexOf("=");
+        if (eq0 < 0 || s.indexOf("(") < eq0) continue;
+      }
       var semi = s.lastIndexOf(";");
       if (semi < 0) continue;
       for (seg in s.substr(0, semi).split(";")) {
@@ -411,7 +414,14 @@ class JitScan {
           var q = StringTools.trim(cutInit(parts[k]));
           if (q != "") names.push(q);
         }
-        for (nm in names) addVar(out, seen, type, nm, isConst, isStatic, nums, sts);
+        for (nm in names) {
+          var ty = type;
+          while (StringTools.startsWith(nm, "*")) {
+            nm = StringTools.trim(nm.substr(1));
+            ty += "*";
+          }
+          addVar(out, seen, ty, nm, isConst, isStatic, nums, sts);
+        }
       }
     }
     return out;
@@ -548,15 +558,28 @@ class JitScan {
   }
 
   static function trimQualifiers(s:String):String {
-    var out = s;
-    for (q in ["static", "const", "volatile", "constexpr", "register", "extern"]) {
-      while (true) {
-        var t = StringTools.trim(out);
-        if (!StringTools.startsWith(t, q + " ")) break;
-        out = t.substr(q.length + 1);
+    var out = StringTools.trim(s);
+    var head = ["static", "const", "volatile", "constexpr", "register", "extern",
+                "inline", "__inline", "__forceinline", "__cdecl", "__stdcall",
+                "__fastcall", "__vectorcall"];
+    var tail = ["const", "volatile"];
+    var again = true;
+    while (again) {
+      again = false;
+      for (q in head) {
+        if (StringTools.startsWith(out, q + " ")) {
+          out = StringTools.trim(out.substr(q.length + 1));
+          again = true;
+        }
+      }
+      for (q in tail) {
+        if (StringTools.endsWith(out, " " + q)) {
+          out = StringTools.trim(out.substr(0, out.length - q.length - 1));
+          again = true;
+        }
       }
     }
-    return StringTools.trim(out);
+    return out;
   }
 
   static function valueType(t:String):String {

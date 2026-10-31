@@ -205,8 +205,13 @@ class JitExprParser {
         v = JNum(d == 0 ? Math.NaN : num(v) / d);
       } else if (c == 37) {
         i++;
+        var a0 = num(v);
         var d = num(parseUnary());
-        v = JNum(d == 0 ? Math.NaN : num(v) - Math.floor(num(v) / d) * d);
+        if (d == 0) {
+          v = JNum(Math.NaN);
+        } else {
+          v = JNum(a0 - trunc(a0 / d) * d);
+        }
       } else break;
     }
     return v;
@@ -277,6 +282,34 @@ class JitExprParser {
 
   function parseNumber():Float {
     var s0 = i;
+    if (i + 1 < n && s.charCodeAt(i) == 48) {
+      var nx = s.charCodeAt(i + 1);
+      if (nx == 120 || nx == 88) {
+        var h0 = i + 2;
+        i = h0;
+        while (i < n) {
+          var c = s.charCodeAt(i);
+          if ((c >= 48 && c <= 57) || (c >= 97 && c <= 102) || (c >= 65 && c <= 70)) i++;
+          else break;
+        }
+        if (i == h0) return Math.NaN;
+        var hv = 0.0;
+        for (k in h0...i) {
+          var c = s.charCodeAt(k);
+          hv = hv * 16 + (c <= 57 ? c - 48 : (c <= 70 ? c - 55 : c - 87));
+        }
+        return hv;
+      }
+      if (nx == 98 || nx == 66) {
+        var b0 = i + 2;
+        i = b0;
+        while (i < n && (s.charCodeAt(i) == 48 || s.charCodeAt(i) == 49)) i++;
+        if (i == b0) return Math.NaN;
+        var bv = 0.0;
+        for (k in b0...i) bv = bv * 2 + (s.charCodeAt(k) - 48);
+        return bv;
+      }
+    }
     while (i < n) {
       var c = s.charCodeAt(i);
       if ((c >= 48 && c <= 57) || c == 46) i++;
@@ -300,6 +333,8 @@ class JitExprParser {
     var s0 = i;
     while (i < n && isNameChar(s.charCodeAt(i))) i++;
     var name = s.substring(s0, i);
+    if (name == "true") return JNum(1);
+    if (name == "false") return JNum(0);
     skip();
     if (peek() == 40) {
       i++;
@@ -371,7 +406,7 @@ class JitExprParser {
       case "log2": Math.log(num(ar[0])) / 0.6931471805599453;
       case "log10": Math.log(num(ar[0])) / 2.302585092994046;
       case "hypot": Math.sqrt(num(ar[0]) * num(ar[0]) + num(ar[1]) * num(ar[1]));
-      case "mod": num(ar[1]) == 0 ? Math.NaN : num(ar[0]) - Math.floor(num(ar[0]) / num(ar[1])) * num(ar[1]);
+      case "mod": num(ar[1]) == 0 ? Math.NaN : num(ar[0]) - trunc(num(ar[0]) / num(ar[1])) * num(ar[1]);
       case "clamp": num(ar[0]) < num(ar[1]) ? num(ar[1]) : (num(ar[0]) > num(ar[2]) ? num(ar[2]) : num(ar[0]));
       case "lerp": num(ar[0]) + (num(ar[1]) - num(ar[0])) * num(ar[2]);
       case "deg": num(ar[0]) * 180.0 / Math.PI;
@@ -397,6 +432,10 @@ class JitExprParser {
   static function intOf(v:JitValue):Int {
     var f = num(v);
     return f != f ? 0 : Std.int(f);
+  }
+
+  static inline function trunc(f:Float):Float {
+    return f < 0 ? Math.ceil(f) : Math.floor(f);
   }
 
   static function truthy(v:JitValue):Bool {

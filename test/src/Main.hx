@@ -178,6 +178,14 @@ RJIT(macroonly) { return 7; }
     ok("session keeps a global for an expression", s.eval("int gs = 21;"));
     eq("session expression sees the source", Std.string(s.evalNum("gs * 2")), "42");
     ok("an expression leaves the source alone", s.source.indexOf("__sess") < 0, s.source);
+    var er = function(n:String):Float return n == "a" ? 3.0 : Math.NaN;
+    var es = function(n:String):String return null;
+    eq("a remainder follows the dividend", Std.string(hxcpp_jit_r.JitExpr.eval("7 % -3", er, es)), "1");
+    eq("a negative remainder", Std.string(hxcpp_jit_r.JitExpr.eval("-7 % 3", er, es)), "-1");
+    eq("the mod function agrees with the operator", Std.string(hxcpp_jit_r.JitExpr.eval("mod(-7,3)", er, es)), "-1");
+    eq("a hex literal", Std.string(hxcpp_jit_r.JitExpr.eval("0x1f", er, es)), "31");
+    eq("a binary literal", Std.string(hxcpp_jit_r.JitExpr.eval("0b101", er, es)), "5");
+    eq("a boolean literal", Std.string(hxcpp_jit_r.JitExpr.eval("true && !false", er, es)), "1");
     s.dispose();
 
     if (JitPlatform.win) {
@@ -1057,6 +1065,18 @@ double alive() { return counter + hits[1]; }
     eq("a plain signature is accepted", Std.string(JitCodegen.extraSigOk("d(dd)")), "true");
     eq("a reference signature is refused", Std.string(JitCodegen.extraSigOk("i(R)")), "false");
     eq("an overflowed signature is refused", Std.string(JitCodegen.extraSigOk("d(dddddddd)")), "false");
+    var vq = JitScan.functions("static __inline int vinl(void) { return 1; }\n");
+    eq("an msvc inline qualifier is skipped", [for (f in vq) f.sig].join(""), "i()");
+    var tq = JitScan.globals("const char* const kq = \"x\";\n");
+    eq("a trailing const on a pointer", [for (v in tq) v.name + ":" + v.kind].join(""), "kq:ptr");
+    var pq = JitScan.globals("int pa = 1, pb = 2, *pc;\n");
+    eq("a star on a later declarator", [for (v in pq) v.name + ":" + v.kind].join(","), "pa:num,pb:num,pc:ptr");
+    var si = JitScan.globals("int sn = sizeof(int);\nint sm;\n");
+    eq("an initialiser that calls a function", [for (v in si) v.name].join(","), "sn,sm");
+    var ci = JitScan.globals("int ca = f(1, 2), cb = 3;\n");
+    eq("several initialisers that call", [for (v in ci) v.name].join(","), "ca,cb");
+    var fd = JitScan.globals("int fdcl(int a);\nint fafter;\n");
+    eq("a declaration does not hide the next line", [for (v in fd) v.name].join(","), "fafter");
 
     head("thread local blocks");
     var seed = haxe.io.Bytes.alloc(8);
