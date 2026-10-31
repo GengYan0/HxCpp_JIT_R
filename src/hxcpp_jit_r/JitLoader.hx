@@ -104,7 +104,11 @@ class JitLoader {
 
   public static function hex64(v:Float):String {
     if (v == 0.0) return "0";
-    return StringTools.hex(JitNative.hiOf64(v) & 0xFFFFF, 0) + StringTools.hex(JitNative.loOf64(v), 8);
+    var i = haxe.Int64.fromFloat(v);
+    var s = StringTools.hex(i.high, 8) + StringTools.hex(i.low, 8);
+    var k = 0;
+    while (k < s.length - 1 && s.charAt(k) == "0") k++;
+    return s.substr(k);
   }
 
   static function readStr(base:cpp.SizeT, rva:Int, max:Int = 512, limit:Int = 0):String {

@@ -154,6 +154,13 @@ class JitElf {
     return false;
   }
 
+  public static function fileOffsetOf(loads:Array<ElfPhdr>, va:Float):Float {
+    for (ph in loads) {
+      if (va >= ph.vaddr && va < ph.vaddr + ph.filesz) return va - ph.vaddr + ph.offset;
+    }
+    return -1;
+  }
+
   public static function relrTargets(b:haxe.io.Bytes, off:Int, size:Int):Array<Float> {
     var out:Array<Float> = [];
     if (off < 0 || off >= b.length) return out;
@@ -406,7 +413,13 @@ class JitElf {
     }
 
     if (relrVa != 0 && relrSz > 0) {
-      var rt = relrTargets(bytes, Std.int(relrVa), Std.int(relrSz));
+      var relrOff = fileOffsetOf(loads, relrVa);
+      if (relrOff < 0) {
+        img.error = "packed relocation table is not in a loaded segment";
+        JitLoader.releaseImage(img);
+        return img;
+      }
+      var rt = relrTargets(bytes, Std.int(relrOff), Std.int(relrSz));
       if (rt.length == 0) {
         img.error = "empty packed relocation table";
         JitLoader.releaseImage(img);

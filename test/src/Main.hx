@@ -621,6 +621,19 @@ int ids[3];
       Jit.dispose("widestruct");
     }
 
+    head("address and table placement");
+    eq("every hex digit of a wide address is kept", JitLoader.hex64(4503599627370496.0), "10000000000000");
+    eq("a small address still prints short", JitLoader.hex64(291.0), "123");
+    eq("a full width address", JitLoader.hex64(-1.0), "FFFFFFFFFFFFFFFF");
+    var loads = [
+      {type: 1, flags: 0, offset: 4096.0, vaddr: 8192.0, filesz: 1280.0, memsz: 2048.0, align: 4096.0},
+      {type: 1, flags: 0, offset: 8192.0, vaddr: 16384.0, filesz: 512.0, memsz: 512.0, align: 4096.0}
+    ];
+    eq("a table address turns into its file offset", Std.string(JitElf.fileOffsetOf(loads, 8192.0)), "4096");
+    eq("an offset inside the segment", Std.string(JitElf.fileOffsetOf(loads, 8448.0)), "4352");
+    eq("the second segment is found too", Std.string(JitElf.fileOffsetOf(loads, 16384.0)), "8192");
+    eq("an address outside every segment is refused", Std.string(JitElf.fileOffsetOf(loads, 4096.0)), "-1");
+
     head("64 bit returns keep their sign");
     var lsrc = "long long rneg() { return -1; }\nlong long rmin() { return -9223372036854775807LL - 1; }\nlong long radd(long long a, long long b) { return a + b; }\nlong rl() { return -5; }\n";
     var lm = Jit.compile("longsign", lsrc);
@@ -689,6 +702,8 @@ double boom(double v) { if (v > 0) throw std::runtime_error("mapped"); return v;
     ok("no cache yet fails", !beforeImp.ok, beforeImp.diag.length > 0 ? JitCompiler.describe(beforeImp.diag[0]) : "");
     var imp = Jit.importPack("packcold");
     ok("import files", imp > 0, imp + " files");
+    var imp2 = Jit.importPack("packcold");
+    eq("a second import copies nothing", Std.string(imp2), "0");
     var c2 = Jit.compile("cold", coldSrc);
     ok("cache-only hit", c2.ok && c2.cached, c2.diag.length > 0 ? JitCompiler.describe(c2.diag[0]) : ("cached=" + c2.cached));
     eq("cache-only call", Std.string(c2.callAuto("twice", [21])), "42");

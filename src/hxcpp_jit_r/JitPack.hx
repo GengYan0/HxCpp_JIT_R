@@ -93,18 +93,17 @@ class JitPack {
       for (f in safeList(p)) {
         if (!isPayload(f)) continue;
         var dst = root + "/" + d + "/" + f;
-        if (FileSystem.exists(dst)) {
-          n++;
-          continue;
-        }
+        if (FileSystem.exists(dst)) continue;
         if (copyFile(p + "/" + f, dst)) n++;
       }
     }
     var h = src + "/rjit_abi.h";
     if (FileSystem.exists(h)) {
       var dstH = root + "/rjit_abi.h";
-      if (!FileSystem.exists(dstH) || File.getContent(dstH) != JitAbi.HEADER) File.saveContent(dstH, JitAbi.HEADER);
-      n++;
+      if (!FileSystem.exists(dstH) || File.getContent(dstH) != JitAbi.HEADER) {
+        File.saveContent(dstH, JitAbi.HEADER);
+        n++;
+      }
     }
     return n;
   }
