@@ -14,10 +14,10 @@
     "runtime",
     "windows"
   ],
-  "description": "Compile and call native C++ from a hxcpp application at runtime.",
+  "description": "Compile C++ at runtime from a hxcpp application and call it directly. C++ source is scanned for signatures, built into a cached module and exposed to Haxe as functions, globals, structs, arrays and strings, with callbacks, hot reload and a REPL-style session.",
   "version": "1.0.1",
   "classPath": "src",
-  "releasenote": "1.0.1: the install section names the haxelib command, and the package carries the haxe and hxcpp tags so a search finds it.",
+  "releasenote": "1.0.1: compile and call C++ from a hxcpp application while it runs. Plain C++ source is scanned for signatures, built into a cached module and exposed to Haxe as functions, globals, structs, arrays and strings.",
   "contributors": [
     "GengYan0"
   ],
