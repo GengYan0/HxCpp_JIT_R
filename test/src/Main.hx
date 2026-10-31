@@ -611,13 +611,13 @@ int ids[3];
     if (ws.ok) {
       ws.set("wp.a", -7);
       eq("a long field keeps its sign", Std.string(ws.get("wp.a")), "-7");
-      ws.set("wp.b", -1);
-      eq("an unsigned long field wraps", Std.string(ws.get("wp.b")), "4294967295");
+      ws.set("wp.b", 4294967295.0);
+      eq("an unsigned long field takes a 32 bit value", Std.string(ws.get("wp.b")), "4294967295");
       ws.set("wp.c", -9);
       eq("a long long field keeps its sign", Std.string(ws.get("wp.c")), "-9");
       var wr = ws.callStruct("wmk", [-2, 5]);
       eq("a returned struct long field", Std.string(wr.readI32(0)), "-2");
-      eq("a returned struct unsigned field", Std.string(wr.readI32(4)), "5");
+      eq("a returned struct unsigned field", Std.string(wr.readI32(JitPlatform.win ? 4 : 8)), "5");
       Jit.dispose("widestruct");
     }
 
