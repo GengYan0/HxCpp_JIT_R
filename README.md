@@ -177,6 +177,8 @@ The standard library, inline assembly, SIMD intrinsics and templates all work. T
 | `Jit.unwatch(path):Bool` / `Jit.watchedFiles()` | Manage watched files |
 | `Jit.eval(code):Float` | One-off expression |
 | `Jit.prefetch()` | Build every registered module into the cache |
+
+Two modules built from the same source hold separate globals: each gets its own binary copy, so a write through one never shows up in the other. Compiling under a name that is already live replaces that module and disposes the old one.
 | `Jit.exportPack(dir, ?only):Int` / `Jit.importPack(dir):Int` | Package and restore the cache; `only` names the modules to include |
 | `Jit.packInfo(dir):String` | Validate a package |
 | `Jit.get(name)` / `Jit.all()` / `Jit.dispose(name)` | Module management |

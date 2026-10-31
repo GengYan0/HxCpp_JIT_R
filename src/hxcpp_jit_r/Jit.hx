@@ -169,6 +169,14 @@ class Jit {
     return m;
   }
 
+  static function keyInUse(key:String):Bool {
+    for (k in mods.keys()) {
+      var mm = mods.get(k);
+      if (mm != null && mm.key == key && mm.valid()) return true;
+    }
+    return false;
+  }
+
   static function multiOf(o:Null<JitOptions>):Null<JitMulti> {
     if (o == null || o.sources == null) return null;
     var files:Array<String> = [];
@@ -248,7 +256,7 @@ class Jit {
     }
     if (debug) log("[jit] key " + key);
     var force = o != null && o.force == true;
-    var existing = force ? null : cache.dllFor(key);
+    var existing = force || keyInUse(key) ? null : cache.dllFor(key);
     if (debug) log("[jit] existing " + existing);
     var loaded = false;
     if (existing != null) {

@@ -242,9 +242,9 @@ RJIT(macroonly) { return 7; }
     eq("f199(2)", Std.string(bm.call("f199", 2)), "398");
 
     head("cache");
-    var src = "RJIT(v) { return 1234; }\n";
-    Jit.compile("cachedemo", src);
-    var c2 = Jit.compile("cachedemo", src);
+    var src = "int cv;\nvoid cadd() { cv++; }\nRJIT(v) { return 1234; }\n";
+    var cc1 = Jit.compile("cachedemo", src);
+    var cc2 = Jit.compile("cachedemo2", src);
     var lkName = "lockprobe" + Std.int(Math.random() * 100000);
     Jit.compile(lkName, 'int lp() { return 1; }');
     var left = [];
@@ -252,8 +252,14 @@ RJIT(macroonly) { return 7; }
       for (f in FileSystem.readDirectory(Jit.cacheDir + "/locks")) if (StringTools.endsWith(f, ".lock")) left.push(f);
     } catch (e:Dynamic) {}
     eq("a build leaves no lock behind", left.join(","), "");
-    ok("second is cached", c2.cached);
-    eq("cached value", Std.string(c2.call("v")), "1234");
+    ok("a module of the same source gets its own binary", cc2.ok && cc1.dll != cc2.dll, cc1.dll + " | " + cc2.dll);
+    if (cc1.ok && cc2.ok) {
+      cc1.callAuto("cadd", []);
+      cc1.callAuto("cadd", []);
+      eq("the first module keeps its own state", Std.string(cc1.getVar("cv")), "2");
+      eq("the second module stays untouched", Std.string(cc2.getVar("cv")), "0");
+    }
+    eq("cached value", Std.string(cc2.call("v")), "1234");
 
     var hdrDir = tmpRoot() + "/rjithdr";
     rmTree(hdrDir);
@@ -409,6 +415,9 @@ std::string empty_one() { return std::string(); }
     ok("string return compile", sr.ok, sr.diag.length > 0 ? JitCompiler.describe(sr.diag[0]) : "");
     eq("greet Haxe", sr.callStr("greet", [], ["Haxe"]), "Hello, Haxe");
     eq("greet utf8", sr.callStr("greet", [], ["caf\u00e9"]), "Hello, caf\u00e9");
+    eq("greet three byte utf8", sr.callStr("greet", [], ["\u4f60\u597d"]), "Hello, \u4f60\u597d");
+    var emoji = String.fromCharCode(0x1F600);
+    eq("greet four byte utf8", sr.callStr("greet", [], [emoji]), "Hello, " + emoji);
     eq("tag pos", sr.callStr("tag", [1]), "pos");
     eq("tag neg", sr.callStr("tag", [0]), "neg");
     eq("empty string return", sr.callStr("empty_one", []), "");
@@ -559,6 +568,41 @@ int ids[3];
     ok("every accepted signature compiles", mm.ok && mmMissing == 0,
       "n=" + mok.length + " missing=" + mmMissing + (mm.ok ? "" : " " + (mm.diag.length > 0 ? JitCompiler.describe(mm.diag[0]) : mm.log)));
     Jit.dispose("sigmatrix");
+
+    head("field widths");
+    var fwsrc = "struct W { double d; float f; int i; unsigned int u; short h; unsigned short uh; char c; unsigned char uc; bool b; };\nW w1;\nint iw[3];\nchar cw[3];\nshort hw[3];\nbool bw[3];\nchar gcw;\nshort gsw;\nunsigned short guw;\nunsigned int guiw;\n";
+    var fw = Jit.compile("fieldwidth", fwsrc);
+    ok("a struct of every width compiles", fw.ok, fw.diag.length > 0 ? JitCompiler.describe(fw.diag[0]) : fw.log);
+    if (fw.ok) {
+      fw.set("w1.c", 300);
+      eq("a signed char field truncates", Std.string(fw.get("w1.c")), "44");
+      fw.set("w1.uc", -1);
+      eq("an unsigned char field truncates", Std.string(fw.get("w1.uc")), "255");
+      fw.set("w1.h", 70000);
+      eq("a short field truncates", Std.string(fw.get("w1.h")), "4464");
+      fw.set("w1.uh", -1);
+      eq("an unsigned short field truncates", Std.string(fw.get("w1.uh")), "65535");
+      fw.set("w1.u", -1);
+      eq("an unsigned field wraps", Std.string(fw.get("w1.u")), "4294967295");
+      fw.set("w1.b", 2);
+      eq("a bool field normalises", Std.string(fw.get("w1.b")), "1");
+      fw.set("w1.f", 1.1);
+      eq("a float field keeps single precision", Std.string(fw.get("w1.f")), "1.10000002384186");
+      fw.set("cw[0]", 300);
+      eq("a char array truncates", Std.string(fw.get("cw[0]")), "44");
+      fw.set("hw[0]", 70000);
+      eq("a short array truncates", Std.string(fw.get("hw[0]")), "4464");
+      fw.set("bw[0]", 2);
+      eq("a bool array normalises", Std.string(fw.get("bw[0]")), "1");
+      eq("a write past the end is ignored", Std.string(fw.get("cw[9]")), "0");
+      fw.setVar("gcw", 300);
+      eq("a global char truncates", Std.string(fw.getVar("gcw")), "44");
+      fw.setVar("guw", -1);
+      eq("a global unsigned short truncates", Std.string(fw.getVar("guw")), "65535");
+      fw.setVar("guiw", -1);
+      eq("a global unsigned wraps", Std.string(fw.getVar("guiw")), "4294967295");
+      Jit.dispose("fieldwidth");
+    }
 
     head("64 bit returns keep their sign");
     var lsrc = "long long rneg() { return -1; }\nlong long rmin() { return -9223372036854775807LL - 1; }\nlong long radd(long long a, long long b) { return a + b; }\nlong rl() { return -5; }\n";
