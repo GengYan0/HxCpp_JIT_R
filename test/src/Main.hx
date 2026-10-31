@@ -483,6 +483,83 @@ int ids[3];
     ok("non zero rjit_init fails the module", !ifm.ok, ifm.diag.length > 0 ? JitCompiler.describe(ifm.diag[0]) : "");
     eq("init failure code", ifm.diag.length > 0 ? ifm.diag[0].code : "", "E_INIT");
 
+    head("malformed pe headers");
+    var pe0 = haxe.io.Bytes.alloc(0x60);
+    pe0.setUInt16(0, 0x5A4D);
+    pe0.setInt32(0x3C, 0x40);
+    pe0.setInt32(0x40, 0x00004550);
+    pe0.setUInt16(0x46, 0);
+    pe0.setUInt16(0x54, 0);
+    var bi0 = JitLoader.parseBytes("bad/pe0", pe0);
+    ok("a pe with no optional header is refused", !bi0.ok && bi0.error != "", bi0.error);
+    var pe2 = haxe.io.Bytes.alloc(0x5A);
+    pe2.setUInt16(0, 0x5A4D);
+    pe2.setInt32(0x3C, 0x40);
+    pe2.setInt32(0x40, 0x00004550);
+    pe2.setUInt16(0x46, 0);
+    pe2.setUInt16(0x54, 2);
+    pe2.setUInt16(0x58, 0x20B);
+    var pe2ran = true;
+    var pe2rej = false;
+    var pe2err = "";
+    try {
+      var bi2 = JitLoader.parseBytes("bad/pe2", pe2);
+      pe2rej = !bi2.ok && bi2.error != "";
+      pe2err = bi2.error;
+    } catch (e:Dynamic) {
+      pe2ran = false;
+      pe2err = Std.string(e);
+    }
+    ok("a two byte optional header is refused, not an exception", pe2ran && pe2rej, pe2err);
+
+    head("malformed elf headers");
+    var elfRan = true;
+    var elfBad = 0;
+    var elfErr = "";
+    try {
+      var mk = function(len:Int, phoff:Float, phnum:Int, phentsize:Int) {
+        var b = haxe.io.Bytes.alloc(len);
+        b.set(0, 0x7F); b.set(1, 0x45); b.set(2, 0x4C); b.set(3, 0x46);
+        b.set(4, 2); b.set(5, 1);
+        b.setInt32(32, Std.int(phoff % 4294967296.0));
+        b.setInt32(36, Std.int(phoff / 4294967296.0));
+        b.setUInt16(54, phentsize);
+        b.setUInt16(56, phnum);
+        return b;
+      };
+      for (c in [
+        {n: "tiny", b: haxe.io.Bytes.alloc(10)},
+        {n: "no headers", b: mk(1024, 64, 0, 56)},
+        {n: "short entry", b: mk(1024, 64, 1, 48)},
+        {n: "past the end", b: mk(1024, 2000, 1, 56)},
+        {n: "huge offset", b: mk(1024, 1e18, 1, 56)},
+        {n: "65535 headers", b: mk(1024, 64, 65535, 56)}
+      ]) {
+        var i = hxcpp_jit_r.JitElf.parse(c.b);
+        if (!i.ok) elfBad++;
+      }
+    } catch (e:Dynamic) {
+      elfRan = false;
+      elfErr = Std.string(e);
+    }
+    ok("malformed elf headers are refused, not thrown", elfRan && elfBad == 6, elfErr + " refused=" + elfBad);
+
+    head("signature matrix");
+    var mt = ["d", "i", "f", "b", "c", "h", "u", "l", "p", "s"];
+    var msig:Array<String> = [];
+    for (r in mt) for (t in mt) msig.push(r + "(" + t + ")");
+    for (r in mt) for (a in mt) for (b in mt) msig.push(r + "(" + a + b + ")");
+    msig.push("v()");
+    msig.push("l(llllll)");
+    msig.push("d(ssss)");
+    var mok = [for (s in msig) if (JitCodegen.extraSigOk(s)) s];
+    var mm = Jit.compile("sigmatrix", "int anchor_sig(int v) { return v; }\n", {sigs: mok});
+    var mmMissing = 0;
+    for (s in mok) if (!mm.hasSig(s)) mmMissing++;
+    ok("every accepted signature compiles", mm.ok && mmMissing == 0,
+      "n=" + mok.length + " missing=" + mmMissing + (mm.ok ? "" : " " + (mm.diag.length > 0 ? JitCompiler.describe(mm.diag[0]) : mm.log)));
+    Jit.dispose("sigmatrix");
+
     head("manual loader");    var manSrc = "int sq(int x) { return x * x; }\nint add3(int a, int b, int c) { return a + b + c; }\ndouble half(double v) { return v / 2; }\n";
     var mp = Jit.compile("man", manSrc, {loader: "manual"});
     ok("manual compile+load", mp.ok, mp.diag.length > 0 ? JitCompiler.describe(mp.diag[0]) : "");
@@ -1341,6 +1418,7 @@ long long ovl(int a, long long b) { return a * 1000 + b; }
     ok("clean keeps the newest binary", sys.FileSystem.exists(Jit.cache.dllFor(pm2.key) ?? ""), "");
     eq("no half written sources left", Std.string(countSuffix(Jit.cache.root, ".w")), "0");
     eq("no pch leftovers", Std.string(countSuffix(Jit.cache.root + "/pch", ".tmp")), "0");
+    eq("no link exports left", Std.string(countSuffix(Jit.cache.root, ".exp")), "0");
 
     head("callback from a native thread");
     var seen = 0;

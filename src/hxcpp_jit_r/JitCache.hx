@@ -128,7 +128,7 @@ class JitCache {
     var n = 0;
     for (f in list(d)) {
       var p = d + "/" + f;
-      if (StringTools.endsWith(f, ".tmp")) {
+      if (StringTools.endsWith(f, ".tmp") || StringTools.endsWith(f, ".exp")) {
         if (del(p)) n++;
         continue;
       }

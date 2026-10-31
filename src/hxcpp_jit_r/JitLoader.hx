@@ -171,12 +171,21 @@ class JitLoader {
       img.error = "truncated optional header";
       return img;
     }
+    if (sizeOpt < 2) {
+      img.error = "truncated optional header";
+      return img;
+    }
     var magic = b.getUInt16(opt);
     if (magic != 0x20B && magic != 0x10B) {
       img.error = "unsupported magic " + StringTools.hex(magic, 4);
       return img;
     }
     img.pe32plus = magic == 0x20B;
+    var need = img.pe32plus ? 112 : 96;
+    if (sizeOpt < need || opt + need > b.length) {
+      img.error = "truncated optional header";
+      return img;
+    }
     img.entry = b.getInt32(opt + 16);
     if (img.pe32plus) {
       img.imageBase = u32(b.getInt32(opt + 28)) * 4294967296.0 + u32(b.getInt32(opt + 24));

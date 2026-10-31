@@ -147,8 +147,15 @@ class JitCompiler {
     return {file: file, obj: obj};
   }
 
-  static function mkdirs(p:String):Void {
-    if (FileSystem.exists(p)) return;
+  static function expFiles(dir:String):Array<String> {
+    var out:Array<String> = [];
+    var names = try sys.FileSystem.readDirectory(dir) catch (e:Dynamic) null;
+    if (names == null) return out;
+    for (f in names) if (StringTools.endsWith(f, ".exp")) out.push(dir + "/" + f);
+    return out;
+  }
+
+  static function mkdirs(p:String):Void {    if (FileSystem.exists(p)) return;
     var q = StringTools.replace(p, "\\", "/");
     var i = q.lastIndexOf("/");
     if (i > 1) mkdirs(q.substr(0, i));
@@ -256,6 +263,7 @@ class JitCompiler {
       ok = FileSystem.exists(out);
     }
     if (FileSystem.exists(tmpOut)) try FileSystem.deleteFile(tmpOut) catch (e:Dynamic) {}
+    for (q in expFiles(dir)) try FileSystem.deleteFile(q) catch (e:Dynamic) {}
     if (ok) cache.prune(key, 2);
     return {
       ok: ok,

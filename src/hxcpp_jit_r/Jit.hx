@@ -195,12 +195,20 @@ class Jit {
   }
 
   static function keySrc(src:String, multi:Null<JitMulti>):String {
-    if (multi == null) return src;
     var b = new StringBuf();
+    var count = multi == null ? 1 : multi.texts.length + 1;
+    b.add(count);
+    b.add("\n");
+    b.add(src.length);
+    b.add("\n");
     b.add(src);
-    for (t in multi.texts) {
-      b.add("\n--tu--\n");
-      b.add(t);
+    if (multi != null) {
+      for (t in multi.texts) {
+        b.add("\n");
+        b.add(t.length);
+        b.add("\n");
+        b.add(t);
+      }
     }
     return b.toString();
   }
